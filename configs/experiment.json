@@ -1,0 +1,51 @@
+{
+  "model": {
+    "name": "unsloth/gemma-3n-E4B-it",
+    "load_in_4bit": true,
+    "max_sequence_length": 1024
+  },
+  "data": {
+    "dataset": "mlabonne/FineTome-100k",
+    "revision": "c2343c1372ff31f51aa21248db18bffa3193efdb",
+    "source_split": "train",
+    "sample_size": 3000,
+    "train_size": 2400,
+    "validation_size": 300,
+    "test_size": 300,
+    "seed": 3407,
+    "output_dir": "data/fine_tome"
+  },
+  "lora": {
+    "rank": 8,
+    "alpha": 8,
+    "dropout": 0.0,
+    "bias": "none",
+    "finetune_vision_layers": false,
+    "finetune_language_layers": true,
+    "finetune_attention_modules": true,
+    "finetune_mlp_modules": true
+  },
+  "training": {
+    "output_dir": "artifacts/checkpoints",
+    "adapter_dir": "artifacts/gemma-3n-qlora",
+    "per_device_train_batch_size": 1,
+    "per_device_eval_batch_size": 1,
+    "gradient_accumulation_steps": 4,
+    "learning_rate": 0.0002,
+    "weight_decay": 0.01,
+    "warmup_steps": 5,
+    "max_steps": 60,
+    "eval_steps": 10,
+    "save_steps": 10,
+    "logging_steps": 1,
+    "optimizer": "adamw_8bit",
+    "scheduler": "linear",
+    "seed": 3407
+  },
+  "evaluation": {
+    "generation_examples": 100,
+    "max_new_tokens": 256,
+    "results_path": "results/base_vs_qlora.json"
+  }
+}
+
