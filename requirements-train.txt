@@ -1,0 +1,8 @@
+# Install the CUDA-compatible PyTorch build for your host before this file.
+accelerate>=1.2,<2
+datasets>=3.2,<4
+peft>=0.14,<1
+transformers>=4.51,<5
+trl>=0.15,<1
+unsloth>=2025.3.19
+
