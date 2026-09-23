@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from gemma_experiment.data import read_jsonl, sha256_file
+from gemma_experiment.integrity import build_completion_encoding, validate_split_checksum
 from gemma_experiment.metrics import exact_match, perplexity, summarize_generations, token_f1
 
 
@@ -37,36 +38,45 @@ def render_example(tokenizer: Any, example: dict[str, Any]) -> tuple[str, str, s
 
 def completion_loss(
     model: Any, tokenizer: Any, examples: list[dict[str, Any]], max_length: int
-) -> float:
+) -> dict[str, float | int]:
     import torch
 
     total_negative_log_likelihood = 0.0
     total_tokens = 0
+    total_removed_prompt_tokens = 0
+    scored_examples = 0
     for example in examples:
         prompt, full_text, _ = render_example(tokenizer, example)
         prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-        encoded = tokenizer(
-            full_text,
-            add_special_tokens=False,
-            truncation=True,
+        full_ids = tokenizer(full_text, add_special_tokens=False)["input_ids"]
+        encoded = build_completion_encoding(
+            prompt_ids=prompt_ids,
+            full_ids=full_ids,
             max_length=max_length,
-            return_tensors="pt",
         )
-        input_ids = encoded["input_ids"].to(model.device)
-        attention_mask = encoded["attention_mask"].to(model.device)
-        labels = input_ids.clone()
-        prompt_length = min(len(prompt_ids), labels.shape[1])
-        labels[:, :prompt_length] = -100
+        input_ids = torch.tensor([encoded.input_ids], dtype=torch.long, device=model.device)
+        attention_mask = torch.ones_like(input_ids)
+        labels = torch.tensor([encoded.labels], dtype=torch.long, device=model.device)
         supervised_tokens = int((labels[:, 1:] != -100).sum().item())
-        if supervised_tokens == 0:
-            continue
+        if supervised_tokens != encoded.completion_tokens:
+            raise RuntimeError(
+                "Completion-token accounting mismatch: "
+                f"expected {encoded.completion_tokens}, scored {supervised_tokens}"
+            )
         with torch.inference_mode():
             output = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
         total_negative_log_likelihood += float(output.loss.item()) * supervised_tokens
         total_tokens += supervised_tokens
+        total_removed_prompt_tokens += encoded.removed_prompt_tokens
+        scored_examples += 1
     if total_tokens == 0:
-        raise RuntimeError("No completion tokens remained after tokenization")
-    return total_negative_log_likelihood / total_tokens
+        raise RuntimeError("No completion tokens were scored")
+    return {
+        "mean_loss": total_negative_log_likelihood / total_tokens,
+        "scored_examples": scored_examples,
+        "scored_tokens": total_tokens,
+        "removed_prompt_tokens": total_removed_prompt_tokens,
+    }
 
 
 def evaluate_variant(
@@ -80,6 +90,7 @@ def evaluate_variant(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     import torch
     from unsloth import FastModel
+    from unsloth.chat_templates import get_chat_template
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -89,19 +100,27 @@ def evaluate_variant(
         max_seq_length=max_length,
         load_in_4bit=load_in_4bit,
     )
+    tokenizer = get_chat_template(tokenizer, chat_template="gemma-3")
     FastModel.for_inference(model)
 
-    mean_loss = completion_loss(model, tokenizer, examples, max_length)
+    loss_summary = completion_loss(model, tokenizer, examples, max_length)
     records = []
     for example in examples[:generation_examples]:
         prompt, _, reference = render_example(tokenizer, example)
-        encoded = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(model.device)
+        prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        prompt_budget = max_length - max_new_tokens
+        if prompt_budget < 1:
+            raise ValueError("max_new_tokens must be smaller than max_length")
+        prompt_ids = prompt_ids[-prompt_budget:]
+        input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=model.device)
+        attention_mask = torch.ones_like(input_ids)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         started = time.perf_counter()
         with torch.inference_mode():
             output = model.generate(
-                **encoded,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
                 max_new_tokens=max_new_tokens,
                 do_sample=False,
                 use_cache=True,
@@ -109,7 +128,7 @@ def evaluate_variant(
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         latency = time.perf_counter() - started
-        generated_ids = output[0, encoded["input_ids"].shape[1] :]
+        generated_ids = output[0, input_ids.shape[1] :]
         prediction = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
         records.append(
             {
@@ -123,9 +142,12 @@ def evaluate_variant(
     metrics = summarize_generations(records)
     metrics.update(
         {
-            "completion_loss": mean_loss,
-            "completion_perplexity": perplexity(mean_loss),
+            "completion_loss": loss_summary["mean_loss"],
+            "completion_perplexity": perplexity(loss_summary["mean_loss"]),
             "test_examples": len(examples),
+            "completion_loss_examples": loss_summary["scored_examples"],
+            "completion_loss_tokens": loss_summary["scored_tokens"],
+            "left_truncated_prompt_tokens": loss_summary["removed_prompt_tokens"],
             "generation_examples": len(records),
             "peak_gpu_memory_gib": (
                 torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
@@ -159,6 +181,7 @@ def main() -> None:
     for path in (test_path, manifest_path, adapter_path):
         if not path.exists():
             raise FileNotFoundError(f"Required experiment artifact does not exist: {path}")
+    test_split_sha256 = validate_split_checksum(test_path, manifest_path, "test")
     examples = read_jsonl(test_path)
 
     common = {
@@ -174,7 +197,7 @@ def main() -> None:
     result = {
         "completed_at_utc": datetime.now(UTC).isoformat(),
         "dataset_manifest_sha256": sha256_file(manifest_path),
-        "test_split_sha256": sha256_file(test_path),
+        "test_split_sha256": test_split_sha256,
         "base_model": model_config["name"],
         "adapter": str(adapter_path),
         "base": base_metrics,
@@ -195,7 +218,10 @@ def main() -> None:
         "environment": environment,
         "config": config,
         "metric_notes": {
-            "completion_loss": "Token-weighted NLL over assistant completion tokens only.",
+            "completion_loss": (
+                "Token-weighted NLL over every assistant completion token. Long prompts are "
+                "left-truncated; completions are never silently truncated."
+            ),
             "exact_match_and_f1": (
                 "Reference-overlap diagnostics for open-ended data; interpret with "
                 "completion loss and qualitative review."

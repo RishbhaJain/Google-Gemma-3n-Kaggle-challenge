@@ -9,6 +9,8 @@ import platform
 from datetime import UTC, datetime
 from pathlib import Path
 
+from gemma_experiment.integrity import validate_split_checksum
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -28,12 +30,17 @@ def main() -> None:
     from datasets import load_dataset
     from trl import SFTConfig, SFTTrainer
     from unsloth import FastModel
+    from unsloth.chat_templates import get_chat_template
 
     data_dir = Path(data_config["output_dir"])
+    manifest_path = data_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Missing data manifest {manifest_path}; run prepare_data.py first")
     data_files = {split: str(data_dir / f"{split}.jsonl") for split in ("train", "validation")}
-    for path in data_files.values():
+    for split, path in data_files.items():
         if not Path(path).exists():
             raise FileNotFoundError(f"Missing prepared split {path}; run prepare_data.py first")
+        validate_split_checksum(Path(path), manifest_path, split)
     dataset = load_dataset("json", data_files=data_files)
 
     model, tokenizer = FastModel.from_pretrained(
@@ -41,6 +48,7 @@ def main() -> None:
         max_seq_length=model_config["max_sequence_length"],
         load_in_4bit=model_config["load_in_4bit"],
     )
+    tokenizer = get_chat_template(tokenizer, chat_template="gemma-3")
     model = FastModel.get_peft_model(
         model,
         finetune_vision_layers=lora_config["finetune_vision_layers"],
