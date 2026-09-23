@@ -20,7 +20,12 @@ notebook.
 
 The dataset manifest stores split checksums, the source revision, dataset
 fingerprint, seed, and row counts. Training never sees the test split. Both model
-variants are evaluated from scratch on the same host and examples.
+variants are evaluated from scratch on the same host and examples. Evaluation
+fails closed if the held-out split no longer matches its manifest checksum. The
+Gemma 3 chat template is applied consistently in training and evaluation, and
+completion-loss tokenization left-truncates prompts while preserving every target
+token. The result artifact reports the exact number of scored examples, completion
+tokens, and removed prompt tokens.
 
 ## Run the experiment
 
