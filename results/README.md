@@ -8,10 +8,10 @@ The result artifact records:
 
 - the SHA-256 hashes of the data manifest and untouched test split;
 - completion-only negative log-likelihood and perplexity over all 300 test examples;
-- exact match and token F1 as secondary reference-overlap diagnostics;
+- exact match and token F1 as secondary reference-overlap diagnostics, with seeded
+  paired-bootstrap confidence intervals for the QLoRA-minus-base deltas;
 - p50/p95 greedy-generation latency, throughput, and peak GPU memory;
 - base-to-adapter deltas, experiment configuration, and hardware/software versions.
 
 Run the three commands in the repository README on one CUDA host, inspect the
 generated JSON, and commit that artifact only when all stages complete successfully.
-

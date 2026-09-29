@@ -45,7 +45,9 @@
   "evaluation": {
     "generation_examples": 100,
     "max_new_tokens": 256,
+    "bootstrap_samples": 2000,
+    "bootstrap_confidence": 0.95,
+    "bootstrap_seed": 3407,
     "results_path": "results/base_vs_qlora.json"
   }
 }
-

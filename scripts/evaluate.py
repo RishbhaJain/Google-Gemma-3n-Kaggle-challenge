@@ -14,7 +14,13 @@ from typing import Any
 
 from gemma_experiment.data import read_jsonl, sha256_file
 from gemma_experiment.integrity import build_completion_encoding, validate_split_checksum
-from gemma_experiment.metrics import exact_match, perplexity, summarize_generations, token_f1
+from gemma_experiment.metrics import (
+    exact_match,
+    paired_bootstrap_delta,
+    perplexity,
+    summarize_generations,
+    token_f1,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -87,7 +93,7 @@ def evaluate_variant(
     generation_examples: int,
     max_new_tokens: int,
     load_in_4bit: bool,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, float]]]:
     import torch
     from unsloth import FastModel
     from unsloth.chat_templates import get_chat_template
@@ -164,7 +170,7 @@ def evaluate_variant(
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    return metrics, environment
+    return metrics, environment, records
 
 
 def main() -> None:
@@ -191,8 +197,15 @@ def main() -> None:
         "max_new_tokens": eval_config["max_new_tokens"],
         "load_in_4bit": model_config["load_in_4bit"],
     }
-    base_metrics, environment = evaluate_variant(model_path=model_config["name"], **common)
-    adapter_metrics, _ = evaluate_variant(model_path=str(adapter_path), **common)
+    base_metrics, environment, base_records = evaluate_variant(
+        model_path=model_config["name"], **common
+    )
+    adapter_metrics, _, adapter_records = evaluate_variant(model_path=str(adapter_path), **common)
+    bootstrap_options = {
+        "confidence": eval_config["bootstrap_confidence"],
+        "samples": eval_config["bootstrap_samples"],
+        "seed": eval_config["bootstrap_seed"],
+    }
 
     result = {
         "completed_at_utc": datetime.now(UTC).isoformat(),
@@ -215,6 +228,14 @@ def main() -> None:
                 "peak_gpu_memory_gib",
             )
         },
+        "paired_bootstrap": {
+            metric: paired_bootstrap_delta(
+                [record[metric] for record in base_records],
+                [record[metric] for record in adapter_records],
+                **bootstrap_options,
+            )
+            for metric in ("exact_match", "token_f1")
+        },
         "environment": environment,
         "config": config,
         "metric_notes": {
@@ -224,7 +245,8 @@ def main() -> None:
             ),
             "exact_match_and_f1": (
                 "Reference-overlap diagnostics for open-ended data; interpret with "
-                "completion loss and qualitative review."
+                "completion loss and qualitative review. Paired bootstrap intervals "
+                "resample prompts, preserving base/adapter pairing."
             ),
             "latency": "Greedy generation, batch size one, measured on a single host.",
         },
