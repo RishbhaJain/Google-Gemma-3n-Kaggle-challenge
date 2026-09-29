@@ -16,7 +16,7 @@ notebook.
 | QLoRA | Rank 8, alpha 8, language attention and MLP modules |
 | Training | 60 steps, effective batch size 4, learning rate 2e-4 |
 | Selection | Lowest validation completion loss, evaluated every 10 steps |
-| Final comparison | Completion NLL/perplexity, reference overlap, latency, throughput, peak VRAM |
+| Final comparison | Completion NLL/perplexity, paired quality intervals, latency, throughput, peak VRAM |
 
 The dataset manifest stores split checksums, the source revision, dataset
 fingerprint, seed, and row counts. Training never sees the test split. Both model
@@ -26,6 +26,10 @@ Gemma 3 chat template is applied consistently in training and evaluation, and
 completion-loss tokenization left-truncates prompts while preserving every target
 token. The result artifact reports the exact number of scored examples, completion
 tokens, and removed prompt tokens.
+For exact match and token F1, a seeded paired bootstrap resamples the same prompts
+for both variants and reports a 95% confidence interval around the QLoRA-minus-base
+delta. This makes uncertainty visible without treating examples as independent
+across the two model runs.
 
 ## Run the experiment
 
@@ -63,8 +67,9 @@ No benchmark numbers are filled in without a completed real-model run. The resul
 JSON captures hardware and software versions so later measurements can be audited.
 
 Completion loss and perplexity are the primary quality measures because FineTome
-contains open-ended assistant responses. Exact match and token F1 are included as
-diagnostics only, not as sufficient measures of conversational quality. A serious
+contains open-ended assistant responses. Exact match and token F1, including their
+paired bootstrap intervals, are diagnostics only, not sufficient measures of
+conversational quality. A serious
 follow-up should add a human rubric or a documented judge model for helpfulness,
 factuality, and safety.
 
@@ -95,4 +100,3 @@ pytest -q
   workload.
 - FineTome is a broad instruction dataset, so downstream task-specific evaluation
   is still required before deployment.
-

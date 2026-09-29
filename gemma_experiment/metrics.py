@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import random
 import re
 import string
 from collections import Counter
@@ -72,3 +73,48 @@ def summarize_generations(records: list[dict[str, float]]) -> dict[str, float]:
 
 def perplexity(mean_loss: float) -> float:
     return math.exp(min(mean_loss, 50.0))
+
+
+def paired_bootstrap_delta(
+    baseline: list[float],
+    candidate: list[float],
+    *,
+    confidence: float = 0.95,
+    samples: int = 2_000,
+    seed: int = 3407,
+) -> dict[str, float | int]:
+    """Estimate a paired mean delta and percentile confidence interval.
+
+    Pairing keeps each prompt's base and adapter scores together during
+    resampling, so example difficulty is not mistaken for model variance.
+    Positive deltas indicate that the candidate performed better.
+    """
+    if not baseline or len(baseline) != len(candidate):
+        raise ValueError("baseline and candidate must have the same non-zero length")
+    if samples < 1:
+        raise ValueError("samples must be at least one")
+    if not 0 < confidence < 1:
+        raise ValueError("confidence must be between zero and one")
+    if not all(math.isfinite(value) for value in baseline + candidate):
+        raise ValueError("bootstrap inputs must contain only finite values")
+
+    paired_deltas = [new - old for old, new in zip(baseline, candidate, strict=True)]
+    observed_delta = sum(paired_deltas) / len(paired_deltas)
+    generator = random.Random(seed)
+    bootstrap_deltas = []
+    for _ in range(samples):
+        bootstrap_deltas.append(
+            sum(generator.choice(paired_deltas) for _ in paired_deltas) / len(paired_deltas)
+        )
+
+    alpha = 1 - confidence
+    return {
+        "observed_delta": observed_delta,
+        "confidence_interval_low": percentile(bootstrap_deltas, alpha / 2),
+        "confidence_interval_high": percentile(bootstrap_deltas, 1 - alpha / 2),
+        "probability_improved": sum(delta > 0 for delta in bootstrap_deltas) / samples,
+        "paired_examples": len(paired_deltas),
+        "confidence": confidence,
+        "bootstrap_samples": samples,
+        "seed": seed,
+    }

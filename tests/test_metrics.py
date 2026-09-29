@@ -5,6 +5,7 @@ import pytest
 from gemma_experiment.metrics import (
     exact_match,
     normalize_answer,
+    paired_bootstrap_delta,
     percentile,
     perplexity,
     summarize_generations,
@@ -43,3 +44,39 @@ def test_generation_summary():
 
 def test_perplexity_is_exponentiated_loss():
     assert perplexity(math.log(10)) == pytest.approx(10.0)
+
+
+def test_paired_bootstrap_is_deterministic_and_preserves_pairing():
+    result = paired_bootstrap_delta(
+        [0.0, 0.5, 0.5, 1.0],
+        [0.5, 1.0, 1.0, 1.0],
+        samples=500,
+        seed=7,
+    )
+
+    assert result["observed_delta"] == pytest.approx(0.375)
+    assert result["confidence_interval_low"] >= 0.0
+    assert result["confidence_interval_high"] <= 0.5
+    assert result["probability_improved"] > 0.95
+    assert result["paired_examples"] == 4
+    assert result == paired_bootstrap_delta(
+        [0.0, 0.5, 0.5, 1.0],
+        [0.5, 1.0, 1.0, 1.0],
+        samples=500,
+        seed=7,
+    )
+
+
+@pytest.mark.parametrize(
+    ("baseline", "candidate", "kwargs", "message"),
+    [
+        ([], [], {}, "same non-zero length"),
+        ([1.0], [1.0, 2.0], {}, "same non-zero length"),
+        ([1.0], [1.0], {"samples": 0}, "at least one"),
+        ([1.0], [1.0], {"confidence": 1.0}, "between zero and one"),
+        ([math.nan], [1.0], {}, "finite values"),
+    ],
+)
+def test_paired_bootstrap_rejects_invalid_inputs(baseline, candidate, kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        paired_bootstrap_delta(baseline, candidate, **kwargs)
