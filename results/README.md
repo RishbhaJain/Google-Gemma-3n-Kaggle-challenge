@@ -7,6 +7,7 @@ needed to produce a genuine run.
 The result artifact records:
 
 - the SHA-256 hashes of the data manifest and untouched test split;
+- the exact base-model commit and SHA-256 hash of the pinned PEFT adapter config;
 - completion-only negative log-likelihood and perplexity over all 300 test examples;
 - exact match and token F1 as secondary reference-overlap diagnostics, with seeded
   paired-bootstrap confidence intervals for the QLoRA-minus-base deltas;
