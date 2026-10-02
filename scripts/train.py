@@ -9,7 +9,11 @@ import platform
 from datetime import UTC, datetime
 from pathlib import Path
 
-from gemma_experiment.integrity import validate_split_checksum
+from gemma_experiment.integrity import (
+    pin_adapter_base_revision,
+    validate_model_revision,
+    validate_split_checksum,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,6 +29,7 @@ def main() -> None:
     data_config = config["data"]
     lora_config = config["lora"]
     train_config = config["training"]
+    model_revision = validate_model_revision(model_config["revision"])
 
     import torch
     from datasets import load_dataset
@@ -45,6 +50,7 @@ def main() -> None:
 
     model, tokenizer = FastModel.from_pretrained(
         model_name=model_config["name"],
+        revision=model_revision,
         max_seq_length=model_config["max_sequence_length"],
         load_in_4bit=model_config["load_in_4bit"],
     )
@@ -107,6 +113,9 @@ def main() -> None:
     adapter_dir.mkdir(parents=True, exist_ok=True)
     trainer.model.save_pretrained(adapter_dir)
     tokenizer.save_pretrained(adapter_dir)
+    adapter_config_sha256 = pin_adapter_base_revision(
+        adapter_dir, model_config["name"], model_revision
+    )
 
     trainable_parameters = sum(
         parameter.numel() for parameter in model.parameters() if parameter.requires_grad
@@ -115,7 +124,9 @@ def main() -> None:
     run_summary = {
         "completed_at_utc": datetime.now(UTC).isoformat(),
         "model": model_config["name"],
+        "model_revision": model_revision,
         "adapter_dir": str(adapter_dir),
+        "adapter_config_sha256": adapter_config_sha256,
         "train_examples": len(dataset["train"]),
         "validation_examples": len(dataset["validation"]),
         "trainable_parameters": trainable_parameters,

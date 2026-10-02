@@ -10,7 +10,7 @@ notebook.
 
 | Component | Configuration |
 |---|---|
-| Base model | `unsloth/gemma-3n-E4B-it`, 4-bit loading |
+| Base model | `unsloth/gemma-3n-E4B-it` at commit `45e9fb1dd0e34db5ff9db1f43a49ac5d8e8b8778`, 4-bit loading |
 | Dataset | `mlabonne/FineTome-100k` at revision `c2343c1372ff31f51aa21248db18bffa3193efdb` |
 | Split | Seeded 2,400 train / 300 validation / 300 held-out test |
 | QLoRA | Rank 8, alpha 8, language attention and MLP modules |
@@ -26,6 +26,9 @@ Gemma 3 chat template is applied consistently in training and evaluation, and
 completion-loss tokenization left-truncates prompts while preserving every target
 token. The result artifact reports the exact number of scored examples, completion
 tokens, and removed prompt tokens.
+The base model is loaded from a full commit SHA rather than mutable `main`. The
+same revision is written into and verified from the PEFT `adapter_config.json`,
+so a later adapter evaluation cannot silently resolve different base weights.
 For exact match and token F1, a seeded paired bootstrap resamples the same prompts
 for both variants and reports a 95% confidence interval around the QLoRA-minus-base
 delta. This makes uncertainty visible without treating examples as independent

@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from gemma_experiment.data import read_jsonl, sha256_file
-from gemma_experiment.integrity import build_completion_encoding, validate_split_checksum
+from gemma_experiment.integrity import (
+    build_completion_encoding,
+    validate_adapter_base_revision,
+    validate_model_revision,
+    validate_split_checksum,
+)
 from gemma_experiment.metrics import (
     exact_match,
     paired_bootstrap_delta,
@@ -93,6 +98,7 @@ def evaluate_variant(
     generation_examples: int,
     max_new_tokens: int,
     load_in_4bit: bool,
+    revision: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, float]]]:
     import torch
     from unsloth import FastModel
@@ -101,11 +107,14 @@ def evaluate_variant(
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
-    model, tokenizer = FastModel.from_pretrained(
-        model_name=model_path,
-        max_seq_length=max_length,
-        load_in_4bit=load_in_4bit,
-    )
+    load_options = {
+        "model_name": model_path,
+        "max_seq_length": max_length,
+        "load_in_4bit": load_in_4bit,
+    }
+    if revision is not None:
+        load_options["revision"] = revision
+    model, tokenizer = FastModel.from_pretrained(**load_options)
     tokenizer = get_chat_template(tokenizer, chat_template="gemma-3")
     FastModel.for_inference(model)
 
@@ -180,6 +189,7 @@ def main() -> None:
     data_config = config["data"]
     train_config = config["training"]
     eval_config = config["evaluation"]
+    model_revision = validate_model_revision(model_config["revision"])
 
     test_path = Path(data_config["output_dir"]) / "test.jsonl"
     manifest_path = Path(data_config["output_dir"]) / "manifest.json"
@@ -188,6 +198,9 @@ def main() -> None:
         if not path.exists():
             raise FileNotFoundError(f"Required experiment artifact does not exist: {path}")
     test_split_sha256 = validate_split_checksum(test_path, manifest_path, "test")
+    adapter_config_sha256 = validate_adapter_base_revision(
+        adapter_path, model_config["name"], model_revision
+    )
     examples = read_jsonl(test_path)
 
     common = {
@@ -198,7 +211,7 @@ def main() -> None:
         "load_in_4bit": model_config["load_in_4bit"],
     }
     base_metrics, environment, base_records = evaluate_variant(
-        model_path=model_config["name"], **common
+        model_path=model_config["name"], revision=model_revision, **common
     )
     adapter_metrics, _, adapter_records = evaluate_variant(model_path=str(adapter_path), **common)
     bootstrap_options = {
@@ -212,7 +225,9 @@ def main() -> None:
         "dataset_manifest_sha256": sha256_file(manifest_path),
         "test_split_sha256": test_split_sha256,
         "base_model": model_config["name"],
+        "base_model_revision": model_revision,
         "adapter": str(adapter_path),
+        "adapter_config_sha256": adapter_config_sha256,
         "base": base_metrics,
         "qlora": adapter_metrics,
         "delta": {
