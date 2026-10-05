@@ -19,7 +19,10 @@ notebook.
 | Final comparison | Completion NLL/perplexity, paired quality intervals, latency, throughput, peak VRAM |
 
 The dataset manifest stores split checksums, the source revision, dataset
-fingerprint, seed, and row counts. Training never sees the test split. Both model
+fingerprint, seed, and row counts. Data preparation also fails closed when
+normalized exact duplicates or high-similarity prompt shingles cross split
+boundaries. The content-safe audit records only split names, source indices, and
+similarity scores, never dataset text. Training never sees the test split. Both model
 variants are evaluated from scratch on the same host and examples. Evaluation
 fails closed if the held-out split no longer matches its manifest checksum. The
 Gemma 3 chat template is applied consistently in training and evaluation, and
@@ -46,13 +49,16 @@ python -m pip install --upgrade pip
 pip install -r requirements-train.txt
 
 python scripts/prepare_data.py --config configs/experiment.json
+python scripts/audit_splits.py --config configs/experiment.json
 python scripts/train.py --config configs/experiment.json
 python scripts/evaluate.py --config configs/experiment.json
 ```
 
-The training script writes the adapter and a machine-readable training summary to
-`artifacts/gemma-3n-qlora/`. The evaluation script writes
-`results/base_vs_qlora.json`.
+Data preparation writes a versioned `leakage_audit.json` and refuses to create a
+usable experiment manifest when cross-split leakage is detected. The standalone
+audit command can recheck prepared files. The training script writes the adapter
+and a machine-readable training summary to `artifacts/gemma-3n-qlora/`. The
+evaluation script writes `results/base_vs_qlora.json`.
 
 ## Held-out results
 
@@ -80,7 +86,8 @@ factuality, and safety.
 
 The lightweight CI job does not download the model or dataset. It checks formatting,
 linting, script compilation, deterministic split behavior, data validation,
-checksums, and metric calculations. GPU training remains an explicit experiment,
+checksums, cross-split leakage detection, and metric calculations. GPU training
+remains an explicit experiment,
 not an unverified CI claim.
 
 Run the local checks with:
@@ -103,3 +110,5 @@ pytest -q
   workload.
 - FineTome is a broad instruction dataset, so downstream task-specific evaluation
   is still required before deployment.
+- The leakage audit detects normalized and lexical near-duplicates, not semantic
+  paraphrases; high-risk datasets still need embedding-based or human review.

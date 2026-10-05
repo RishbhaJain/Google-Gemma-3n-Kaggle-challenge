@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from gemma_experiment.data import deterministic_split, sha256_file, write_jsonl
+from gemma_experiment.leakage import audit_split_leakage, require_leakage_free
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,6 +40,18 @@ def main() -> None:
     )
 
     output_dir = Path(data_config["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    audit_config = data_config["leakage_audit"]
+    leakage_report = audit_split_leakage(
+        splits,
+        near_duplicate_threshold=audit_config["near_duplicate_threshold"],
+        shingle_size=audit_config["shingle_size"],
+        max_findings=audit_config["max_findings"],
+    )
+    leakage_path = output_dir / "leakage_audit.json"
+    leakage_path.write_text(json.dumps(leakage_report, indent=2) + "\n", encoding="utf-8")
+    require_leakage_free(leakage_report)
+
     files = {}
     for split_name, examples in splits.items():
         path = output_dir / f"{split_name}.jsonl"
@@ -57,6 +70,12 @@ def main() -> None:
         "sample_size": data_config["sample_size"],
         "seed": data_config["seed"],
         "dataset_fingerprint": getattr(dataset, "_fingerprint", None),
+        "leakage_audit": {
+            "path": str(leakage_path),
+            "sha256": sha256_file(leakage_path),
+            "summary": leakage_report["summary"],
+            "config": leakage_report["config"],
+        },
         "files": files,
     }
     manifest_path = output_dir / "manifest.json"

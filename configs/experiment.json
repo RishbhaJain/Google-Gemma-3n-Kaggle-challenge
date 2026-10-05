@@ -14,7 +14,12 @@
     "validation_size": 300,
     "test_size": 300,
     "seed": 3407,
-    "output_dir": "data/fine_tome"
+    "output_dir": "data/fine_tome",
+    "leakage_audit": {
+      "near_duplicate_threshold": 0.95,
+      "shingle_size": 3,
+      "max_findings": 100
+    }
   },
   "lora": {
     "rank": 8,
