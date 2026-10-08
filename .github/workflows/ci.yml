@@ -26,6 +26,8 @@ jobs:
         run: ruff check .
       - name: Compile scripts
         run: python -m compileall -q gemma_experiment scripts
+      - name: Validate experiment configuration
+        run: python -m scripts.validate_config --config configs/experiment.json
       - name: Run unit tests
         run: pytest -q
 

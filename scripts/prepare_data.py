@@ -8,6 +8,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from gemma_experiment.config import load_config
 from gemma_experiment.data import deterministic_split, sha256_file, write_jsonl
 from gemma_experiment.leakage import audit_split_leakage, require_leakage_free
 
@@ -20,7 +21,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    config = json.loads(args.config.read_text(encoding="utf-8"))
+    config, config_report = load_config(args.config)
     data_config = config["data"]
 
     from datasets import load_dataset
@@ -70,6 +71,7 @@ def main() -> None:
         "sample_size": data_config["sample_size"],
         "seed": data_config["seed"],
         "dataset_fingerprint": getattr(dataset, "_fingerprint", None),
+        "experiment_config_sha256": config_report["config_sha256"],
         "leakage_audit": {
             "path": str(leakage_path),
             "sha256": sha256_file(leakage_path),

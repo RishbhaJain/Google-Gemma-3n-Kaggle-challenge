@@ -9,6 +9,7 @@ import platform
 from datetime import UTC, datetime
 from pathlib import Path
 
+from gemma_experiment.config import load_config
 from gemma_experiment.integrity import (
     pin_adapter_base_revision,
     validate_model_revision,
@@ -24,7 +25,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    config = json.loads(args.config.read_text(encoding="utf-8"))
+    config, config_report = load_config(args.config)
     model_config = config["model"]
     data_config = config["data"]
     lora_config = config["lora"]
@@ -127,6 +128,8 @@ def main() -> None:
         "model_revision": model_revision,
         "adapter_dir": str(adapter_dir),
         "adapter_config_sha256": adapter_config_sha256,
+        "experiment_config_sha256": config_report["config_sha256"],
+        "run_budget": config_report["derived"],
         "train_examples": len(dataset["train"]),
         "validation_examples": len(dataset["validation"]),
         "trainable_parameters": trainable_parameters,

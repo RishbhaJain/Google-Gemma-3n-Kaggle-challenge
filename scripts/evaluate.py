@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from gemma_experiment.config import load_config
 from gemma_experiment.data import read_jsonl, sha256_file
 from gemma_experiment.integrity import (
     build_completion_encoding,
@@ -184,7 +185,7 @@ def evaluate_variant(
 
 def main() -> None:
     args = parse_args()
-    config = json.loads(args.config.read_text(encoding="utf-8"))
+    config, config_report = load_config(args.config)
     model_config = config["model"]
     data_config = config["data"]
     train_config = config["training"]
@@ -223,6 +224,8 @@ def main() -> None:
     result = {
         "completed_at_utc": datetime.now(UTC).isoformat(),
         "dataset_manifest_sha256": sha256_file(manifest_path),
+        "experiment_config_sha256": config_report["config_sha256"],
+        "run_budget": config_report["derived"],
         "test_split_sha256": test_split_sha256,
         "base_model": model_config["name"],
         "base_model_revision": model_revision,
