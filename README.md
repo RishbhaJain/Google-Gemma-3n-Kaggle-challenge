@@ -48,11 +48,19 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements-train.txt
 
-python scripts/prepare_data.py --config configs/experiment.json
-python scripts/audit_splits.py --config configs/experiment.json
-python scripts/train.py --config configs/experiment.json
-python scripts/evaluate.py --config configs/experiment.json
+python -m scripts.validate_config --config configs/experiment.json
+python -m scripts.prepare_data --config configs/experiment.json
+python -m scripts.audit_splits --config configs/experiment.json
+python -m scripts.train --config configs/experiment.json
+python -m scripts.evaluate --config configs/experiment.json
 ```
+
+Configuration validation runs before model or dataset imports. It rejects mutable
+revisions, inconsistent split totals, invalid evaluation bounds, and incompatible
+checkpoint/evaluation intervals. The command also prints a canonical SHA-256
+fingerprint and the derived run budget. For the checked-in configuration, the
+effective batch size is 4 and 60 optimizer steps consume 240 examples, equivalent
+to 0.1 pass over the 2,400-example training split.
 
 Data preparation writes a versioned `leakage_audit.json` and refuses to create a
 usable experiment manifest when cross-split leakage is detected. The standalone
@@ -85,7 +93,8 @@ factuality, and safety.
 ## Reproducibility and CI
 
 The lightweight CI job does not download the model or dataset. It checks formatting,
-linting, script compilation, deterministic split behavior, data validation,
+linting, script compilation, the checked-in experiment contract, deterministic
+split behavior, data validation,
 checksums, cross-split leakage detection, and metric calculations. GPU training
 remains an explicit experiment,
 not an unverified CI claim.
