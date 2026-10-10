@@ -16,7 +16,7 @@ notebook.
 | QLoRA | Rank 8, alpha 8, language attention and MLP modules |
 | Training | 60 steps, effective batch size 4, learning rate 2e-4 |
 | Selection | Lowest validation completion loss, evaluated every 10 steps |
-| Final comparison | Completion NLL/perplexity, paired quality intervals, latency, throughput, peak VRAM |
+| Final comparison | Completion NLL/perplexity, paired quality intervals, warm-up-aware latency, throughput, peak VRAM |
 
 The dataset manifest stores split checksums, the source revision, dataset
 fingerprint, seed, and row counts. Data preparation also fails closed when
@@ -66,7 +66,10 @@ Data preparation writes a versioned `leakage_audit.json` and refuses to create a
 usable experiment manifest when cross-split leakage is detected. The standalone
 audit command can recheck prepared files. The training script writes the adapter
 and a machine-readable training summary to `artifacts/gemma-3n-qlora/`. The
-evaluation script writes `results/base_vs_qlora.json`.
+evaluation script writes `results/base_vs_qlora.json`. Its benchmark fails closed
+when CUDA is unavailable, runs three untimed warm-up requests per variant,
+synchronizes CUDA around every measured generation, and retains content-free
+request-level token counts and timings behind the aggregates.
 
 ## Held-out results
 
@@ -81,7 +84,8 @@ evaluation script writes `results/base_vs_qlora.json`.
 | Peak GPU memory | pending GPU run | pending GPU run | pending |
 
 No benchmark numbers are filled in without a completed real-model run. The result
-JSON captures hardware and software versions so later measurements can be audited.
+JSON captures hardware and software versions, model-load time, total device memory,
+and request-level benchmark records so later measurements can be audited.
 
 Completion loss and perplexity are the primary quality measures because FineTome
 contains open-ended assistant responses. Exact match and token F1, including their

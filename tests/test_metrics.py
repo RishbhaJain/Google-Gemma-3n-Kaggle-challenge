@@ -32,14 +32,61 @@ def test_percentile_interpolates():
 def test_generation_summary():
     summary = summarize_generations(
         [
-            {"exact_match": 1.0, "token_f1": 1.0, "latency_seconds": 1.0, "generated_tokens": 10.0},
-            {"exact_match": 0.0, "token_f1": 0.5, "latency_seconds": 3.0, "generated_tokens": 10.0},
+            {
+                "exact_match": 1.0,
+                "token_f1": 1.0,
+                "latency_seconds": 1.0,
+                "prompt_tokens": 20.0,
+                "generated_tokens": 10.0,
+            },
+            {
+                "exact_match": 0.0,
+                "token_f1": 0.5,
+                "latency_seconds": 3.0,
+                "prompt_tokens": 30.0,
+                "generated_tokens": 10.0,
+            },
         ]
     )
     assert summary["exact_match"] == 0.5
     assert summary["token_f1"] == 0.75
     assert summary["latency_p50_seconds"] == 2.0
+    assert summary["generation_requests"] == 2.0
+    assert summary["input_tokens"] == 50.0
+    assert summary["output_tokens"] == 20.0
+    assert summary["requests_per_second"] == 0.5
     assert summary["tokens_per_second"] == 5.0
+
+
+@pytest.mark.parametrize(
+    ("record", "message"),
+    [
+        ({}, "missing"),
+        (
+            {
+                "exact_match": 1.0,
+                "token_f1": 1.0,
+                "latency_seconds": 0.0,
+                "prompt_tokens": 5.0,
+                "generated_tokens": 1.0,
+            },
+            "latency_seconds must be positive",
+        ),
+        (
+            {
+                "exact_match": 1.0,
+                "token_f1": 1.0,
+                "latency_seconds": 1.0,
+                "prompt_tokens": 5.0,
+                "generated_tokens": math.nan,
+            },
+            "must be finite",
+        ),
+    ],
+)
+def test_generation_summary_rejects_invalid_benchmark_records(record, message):
+    with pytest.raises(ValueError, match=message):
+        summarize_generations([record])
 
 
 def test_perplexity_is_exponentiated_loss():

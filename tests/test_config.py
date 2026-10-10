@@ -21,7 +21,7 @@ def checked_in_config() -> dict:
 def test_checked_in_config_reports_run_budget_and_fingerprint():
     config, report = load_config(CONFIG_PATH)
 
-    assert report["schema_version"] == 1
+    assert report["schema_version"] == 2
     assert report["config_sha256"] == config_sha256(config)
     assert len(report["config_sha256"]) == 64
     assert report["derived"] == {
@@ -30,6 +30,8 @@ def test_checked_in_config_reports_run_budget_and_fingerprint():
         "equivalent_training_epochs": 0.1,
         "evaluation_events": 6,
         "checkpoint_events": 6,
+        "warmup_generation_requests": 3,
+        "timed_generation_requests_per_variant": 100,
     }
 
 
@@ -50,6 +52,8 @@ def test_fingerprint_is_canonical_and_changes_with_configuration():
         (("training", "per_device_train_batch_size"), True, "must be an integer"),
         (("training", "save_steps"), 15, "divisible by eval_steps"),
         (("evaluation", "generation_examples"), 301, "must not exceed"),
+        (("evaluation", "warmup_examples"), 101, "must not exceed"),
+        (("evaluation", "require_cuda"), "yes", "must be a boolean"),
         (("evaluation", "max_new_tokens"), 1024, "must be smaller"),
         (("lora", "dropout"), 1.0, "must be <"),
         (("evaluation", "bootstrap_confidence"), 0.0, "must be >"),

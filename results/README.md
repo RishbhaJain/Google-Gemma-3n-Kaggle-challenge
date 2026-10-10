@@ -11,8 +11,12 @@ The result artifact records:
 - completion-only negative log-likelihood and perplexity over all 300 test examples;
 - exact match and token F1 as secondary reference-overlap diagnostics, with seeded
   paired-bootstrap confidence intervals for the QLoRA-minus-base deltas;
-- p50/p95 greedy-generation latency, throughput, and peak GPU memory;
+- warm-up-excluded p50/p95 greedy-generation latency, request and token throughput,
+  model-load time, and steady-state peak GPU memory;
+- content-free per-request prompt/output token counts and synchronized timings;
 - base-to-adapter deltas, experiment configuration, and hardware/software versions.
 
-Run the three commands in the repository README on one CUDA host, inspect the
-generated JSON, and commit that artifact only when all stages complete successfully.
+The checked-in contract requires CUDA and excludes three warm-up requests per
+variant from measured latency. Run the commands in the repository README on one
+CUDA host, inspect the generated JSON, and commit that artifact only when all stages
+complete successfully.

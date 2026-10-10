@@ -91,17 +91,32 @@ def completion_loss(
     }
 
 
+def validate_benchmark_runtime(*, cuda_available: bool, require_cuda: bool) -> None:
+    """Prevent an accidental CPU run from being published as the GPU benchmark."""
+
+    if require_cuda and not cuda_available:
+        raise RuntimeError(
+            "CUDA is required by the experiment contract; refusing to publish CPU "
+            "latency and memory as GPU benchmark results"
+        )
+
+
 def evaluate_variant(
     *,
     model_path: str,
     examples: list[dict[str, Any]],
     max_length: int,
     generation_examples: int,
+    warmup_examples: int,
     max_new_tokens: int,
     load_in_4bit: bool,
+    require_cuda: bool,
     revision: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, float]]]:
     import torch
+
+    validate_benchmark_runtime(cuda_available=torch.cuda.is_available(), require_cuda=require_cuda)
+
     from unsloth import FastModel
     from unsloth.chat_templates import get_chat_template
 
@@ -115,26 +130,32 @@ def evaluate_variant(
     }
     if revision is not None:
         load_options["revision"] = revision
+    load_started = time.perf_counter()
     model, tokenizer = FastModel.from_pretrained(**load_options)
     tokenizer = get_chat_template(tokenizer, chat_template="gemma-3")
     FastModel.for_inference(model)
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    model_load_seconds = time.perf_counter() - load_started
 
     loss_summary = completion_loss(model, tokenizer, examples, max_length)
-    records = []
-    for example in examples[:generation_examples]:
-        prompt, _, reference = render_example(tokenizer, example)
-        prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+
+    def generate_record(
+        example: dict[str, Any], *, _model: Any = model, _tokenizer: Any = tokenizer
+    ) -> dict[str, float]:
+        prompt, _, reference = render_example(_tokenizer, example)
+        prompt_ids = _tokenizer(prompt, add_special_tokens=False)["input_ids"]
         prompt_budget = max_length - max_new_tokens
         if prompt_budget < 1:
             raise ValueError("max_new_tokens must be smaller than max_length")
         prompt_ids = prompt_ids[-prompt_budget:]
-        input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=model.device)
+        input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=_model.device)
         attention_mask = torch.ones_like(input_ids)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         started = time.perf_counter()
         with torch.inference_mode():
-            output = model.generate(
+            output = _model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 max_new_tokens=max_new_tokens,
@@ -145,15 +166,23 @@ def evaluate_variant(
             torch.cuda.synchronize()
         latency = time.perf_counter() - started
         generated_ids = output[0, input_ids.shape[1] :]
-        prediction = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-        records.append(
-            {
-                "exact_match": exact_match(prediction, reference),
-                "token_f1": token_f1(prediction, reference),
-                "latency_seconds": latency,
-                "generated_tokens": float(len(generated_ids)),
-            }
-        )
+        prediction = _tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+        return {
+            "exact_match": exact_match(prediction, reference),
+            "token_f1": token_f1(prediction, reference),
+            "latency_seconds": latency,
+            "prompt_tokens": float(input_ids.shape[1]),
+            "generated_tokens": float(len(generated_ids)),
+        }
+
+    for example in examples[:warmup_examples]:
+        generate_record(example)
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+
+    records = []
+    for index, example in enumerate(examples[:generation_examples]):
+        records.append({"example_index": float(index), **generate_record(example)})
 
     metrics = summarize_generations(records)
     metrics.update(
@@ -165,6 +194,8 @@ def evaluate_variant(
             "completion_loss_tokens": loss_summary["scored_tokens"],
             "left_truncated_prompt_tokens": loss_summary["removed_prompt_tokens"],
             "generation_examples": len(records),
+            "warmup_examples": warmup_examples,
+            "model_load_seconds": model_load_seconds,
             "peak_gpu_memory_gib": (
                 torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
             ),
@@ -175,8 +206,14 @@ def evaluate_variant(
         "pytorch": torch.__version__,
         "cuda": torch.version.cuda,
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "gpu_total_memory_gib": (
+            torch.cuda.get_device_properties(0).total_memory / 1024**3
+            if torch.cuda.is_available()
+            else None
+        ),
+        "cuda_required": require_cuda,
     }
-    del model, tokenizer
+    del generate_record, model, tokenizer
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -208,8 +245,10 @@ def main() -> None:
         "examples": examples,
         "max_length": model_config["max_sequence_length"],
         "generation_examples": min(eval_config["generation_examples"], len(examples)),
+        "warmup_examples": eval_config["warmup_examples"],
         "max_new_tokens": eval_config["max_new_tokens"],
         "load_in_4bit": model_config["load_in_4bit"],
+        "require_cuda": eval_config["require_cuda"],
     }
     base_metrics, environment, base_records = evaluate_variant(
         model_path=model_config["name"], revision=model_revision, **common
@@ -243,6 +282,8 @@ def main() -> None:
                 "latency_p50_seconds",
                 "latency_p95_seconds",
                 "tokens_per_second",
+                "requests_per_second",
+                "model_load_seconds",
                 "peak_gpu_memory_gib",
             )
         },
@@ -255,6 +296,10 @@ def main() -> None:
             for metric in ("exact_match", "token_f1")
         },
         "environment": environment,
+        "inference_records": {
+            "base": base_records,
+            "qlora": adapter_records,
+        },
         "config": config,
         "metric_notes": {
             "completion_loss": (
@@ -266,7 +311,12 @@ def main() -> None:
                 "completion loss and qualitative review. Paired bootstrap intervals "
                 "resample prompts, preserving base/adapter pairing."
             ),
-            "latency": "Greedy generation, batch size one, measured on a single host.",
+            "latency": (
+                "Steady-state greedy generation at batch size one on a single CUDA host. "
+                "Configured warm-up requests are excluded from latency and throughput. "
+                "CUDA synchronization brackets every timed request; request-level token "
+                "counts and timings are retained for audit."
+            ),
         },
     }
     result_path = Path(eval_config["results_path"])
