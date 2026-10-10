@@ -55,19 +55,49 @@ def summarize_generations(records: list[dict[str, float]]) -> dict[str, float]:
         return {
             "exact_match": 0.0,
             "token_f1": 0.0,
+            "generation_requests": 0.0,
+            "input_tokens": 0.0,
+            "output_tokens": 0.0,
             "latency_p50_seconds": 0.0,
             "latency_p95_seconds": 0.0,
+            "requests_per_second": 0.0,
             "tokens_per_second": 0.0,
         }
+    required = {
+        "exact_match",
+        "token_f1",
+        "latency_seconds",
+        "prompt_tokens",
+        "generated_tokens",
+    }
+    for index, record in enumerate(records):
+        missing = required - record.keys()
+        if missing:
+            raise ValueError(f"generation record {index} is missing {sorted(missing)}")
+        for field in required:
+            value = record[field]
+            if not math.isfinite(value):
+                raise ValueError(f"generation record {index}.{field} must be finite")
+        if record["latency_seconds"] <= 0:
+            raise ValueError(f"generation record {index}.latency_seconds must be positive")
+        if record["prompt_tokens"] < 1:
+            raise ValueError(f"generation record {index}.prompt_tokens must be positive")
+        if record["generated_tokens"] < 1:
+            raise ValueError(f"generation record {index}.generated_tokens must be positive")
     latencies = [record["latency_seconds"] for record in records]
+    total_input_tokens = sum(record["prompt_tokens"] for record in records)
     total_tokens = sum(record["generated_tokens"] for record in records)
     total_time = sum(latencies)
     return {
         "exact_match": sum(record["exact_match"] for record in records) / len(records),
         "token_f1": sum(record["token_f1"] for record in records) / len(records),
+        "generation_requests": float(len(records)),
+        "input_tokens": total_input_tokens,
+        "output_tokens": total_tokens,
         "latency_p50_seconds": median(latencies),
         "latency_p95_seconds": percentile(latencies, 0.95),
-        "tokens_per_second": total_tokens / total_time if total_time else 0.0,
+        "requests_per_second": len(records) / total_time,
+        "tokens_per_second": total_tokens / total_time,
     }
 
 

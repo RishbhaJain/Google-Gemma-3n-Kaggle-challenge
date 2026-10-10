@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-CONFIG_SCHEMA_VERSION = 1
+CONFIG_SCHEMA_VERSION = 2
 _COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -191,6 +191,12 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     )
     if generation_examples > test_size:
         raise ConfigValidationError("evaluation.generation_examples must not exceed data.test_size")
+    warmup_examples = _integer(evaluation.get("warmup_examples"), "evaluation.warmup_examples")
+    if warmup_examples > generation_examples:
+        raise ConfigValidationError(
+            "evaluation.warmup_examples must not exceed evaluation.generation_examples"
+        )
+    _boolean(evaluation.get("require_cuda"), "evaluation.require_cuda")
     max_new_tokens = _integer(evaluation.get("max_new_tokens"), "evaluation.max_new_tokens")
     if max_new_tokens >= max_sequence_length:
         raise ConfigValidationError(
@@ -219,6 +225,8 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
             "equivalent_training_epochs": examples_consumed / train_size,
             "evaluation_events": max_steps // eval_steps,
             "checkpoint_events": max_steps // save_steps,
+            "warmup_generation_requests": warmup_examples,
+            "timed_generation_requests_per_variant": generation_examples,
         },
     }
 
