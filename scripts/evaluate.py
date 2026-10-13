@@ -23,6 +23,7 @@ from gemma_experiment.integrity import (
 from gemma_experiment.metrics import (
     exact_match,
     paired_bootstrap_delta,
+    paired_weighted_bootstrap_delta,
     perplexity,
     summarize_generations,
     token_f1,
@@ -50,14 +51,15 @@ def render_example(tokenizer: Any, example: dict[str, Any]) -> tuple[str, str, s
 
 def completion_loss(
     model: Any, tokenizer: Any, examples: list[dict[str, Any]], max_length: int
-) -> dict[str, float | int]:
+) -> tuple[dict[str, float | int], list[dict[str, float | int]]]:
     import torch
 
     total_negative_log_likelihood = 0.0
     total_tokens = 0
     total_removed_prompt_tokens = 0
     scored_examples = 0
-    for example in examples:
+    records = []
+    for example_index, example in enumerate(examples):
         prompt, full_text, _ = render_example(tokenizer, example)
         prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
         full_ids = tokenizer(full_text, add_special_tokens=False)["input_ids"]
@@ -77,18 +79,43 @@ def completion_loss(
             )
         with torch.inference_mode():
             output = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-        total_negative_log_likelihood += float(output.loss.item()) * supervised_tokens
+        mean_loss = float(output.loss.item())
+        total_negative_log_likelihood += mean_loss * supervised_tokens
         total_tokens += supervised_tokens
         total_removed_prompt_tokens += encoded.removed_prompt_tokens
         scored_examples += 1
+        records.append(
+            {
+                "example_index": example_index,
+                "mean_loss": mean_loss,
+                "scored_tokens": supervised_tokens,
+            }
+        )
     if total_tokens == 0:
         raise RuntimeError("No completion tokens were scored")
-    return {
-        "mean_loss": total_negative_log_likelihood / total_tokens,
-        "scored_examples": scored_examples,
-        "scored_tokens": total_tokens,
-        "removed_prompt_tokens": total_removed_prompt_tokens,
-    }
+    return (
+        {
+            "mean_loss": total_negative_log_likelihood / total_tokens,
+            "scored_examples": scored_examples,
+            "scored_tokens": total_tokens,
+            "removed_prompt_tokens": total_removed_prompt_tokens,
+        },
+        records,
+    )
+
+
+def validate_paired_loss_records(
+    baseline: list[dict[str, float | int]],
+    candidate: list[dict[str, float | int]],
+) -> None:
+    """Fail closed if loss comparisons do not refer to identical tokenized examples."""
+    if not baseline or len(baseline) != len(candidate):
+        raise ValueError("loss records must have the same non-zero length")
+    for base_record, candidate_record in zip(baseline, candidate, strict=True):
+        if base_record["example_index"] != candidate_record["example_index"]:
+            raise ValueError("loss record example indices are not aligned")
+        if base_record["scored_tokens"] != candidate_record["scored_tokens"]:
+            raise ValueError("loss record token counts differ between model variants")
 
 
 def validate_benchmark_runtime(*, cuda_available: bool, require_cuda: bool) -> None:
@@ -112,7 +139,12 @@ def evaluate_variant(
     load_in_4bit: bool,
     require_cuda: bool,
     revision: str | None = None,
-) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, float]]]:
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    list[dict[str, float]],
+    list[dict[str, float | int]],
+]:
     import torch
 
     validate_benchmark_runtime(cuda_available=torch.cuda.is_available(), require_cuda=require_cuda)
@@ -138,7 +170,7 @@ def evaluate_variant(
         torch.cuda.synchronize()
     model_load_seconds = time.perf_counter() - load_started
 
-    loss_summary = completion_loss(model, tokenizer, examples, max_length)
+    loss_summary, loss_records = completion_loss(model, tokenizer, examples, max_length)
 
     def generate_record(
         example: dict[str, Any], *, _model: Any = model, _tokenizer: Any = tokenizer
@@ -217,7 +249,7 @@ def evaluate_variant(
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    return metrics, environment, records
+    return metrics, environment, records, loss_records
 
 
 def main() -> None:
@@ -250,10 +282,13 @@ def main() -> None:
         "load_in_4bit": model_config["load_in_4bit"],
         "require_cuda": eval_config["require_cuda"],
     }
-    base_metrics, environment, base_records = evaluate_variant(
+    base_metrics, environment, base_records, base_loss_records = evaluate_variant(
         model_path=model_config["name"], revision=model_revision, **common
     )
-    adapter_metrics, _, adapter_records = evaluate_variant(model_path=str(adapter_path), **common)
+    adapter_metrics, _, adapter_records, adapter_loss_records = evaluate_variant(
+        model_path=str(adapter_path), **common
+    )
+    validate_paired_loss_records(base_loss_records, adapter_loss_records)
     bootstrap_options = {
         "confidence": eval_config["bootstrap_confidence"],
         "samples": eval_config["bootstrap_samples"],
@@ -288,23 +323,39 @@ def main() -> None:
             )
         },
         "paired_bootstrap": {
-            metric: paired_bootstrap_delta(
-                [record[metric] for record in base_records],
-                [record[metric] for record in adapter_records],
+            "completion_loss": paired_weighted_bootstrap_delta(
+                [float(record["mean_loss"]) for record in base_loss_records],
+                [float(record["mean_loss"]) for record in adapter_loss_records],
+                [int(record["scored_tokens"]) for record in base_loss_records],
+                lower_is_better=True,
                 **bootstrap_options,
-            )
-            for metric in ("exact_match", "token_f1")
+            ),
+            **{
+                metric: paired_bootstrap_delta(
+                    [record[metric] for record in base_records],
+                    [record[metric] for record in adapter_records],
+                    **bootstrap_options,
+                )
+                for metric in ("exact_match", "token_f1")
+            },
         },
         "environment": environment,
         "inference_records": {
-            "base": base_records,
-            "qlora": adapter_records,
+            "generation": {
+                "base": base_records,
+                "qlora": adapter_records,
+            },
+            "completion_loss": {
+                "base": base_loss_records,
+                "qlora": adapter_loss_records,
+            },
         },
         "config": config,
         "metric_notes": {
             "completion_loss": (
                 "Token-weighted NLL over every assistant completion token. Long prompts are "
-                "left-truncated; completions are never silently truncated."
+                "left-truncated; completions are never silently truncated. Per-example losses "
+                "receive a paired, token-weighted bootstrap interval; lower deltas are better."
             ),
             "exact_match_and_f1": (
                 "Reference-overlap diagnostics for open-ended data; interpret with "

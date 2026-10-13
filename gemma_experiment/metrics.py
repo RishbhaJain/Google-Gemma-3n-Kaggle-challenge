@@ -148,3 +148,65 @@ def paired_bootstrap_delta(
         "bootstrap_samples": samples,
         "seed": seed,
     }
+
+
+def paired_weighted_bootstrap_delta(
+    baseline: list[float],
+    candidate: list[float],
+    weights: list[int],
+    *,
+    confidence: float = 0.95,
+    samples: int = 2_000,
+    seed: int = 3407,
+    lower_is_better: bool = False,
+) -> dict[str, float | int | str]:
+    """Bootstrap a paired, weighted mean delta over evaluation examples.
+
+    Resampling happens at the example level so the base and candidate losses for
+    one prompt always move together. Within each resample, token counts weight
+    the mean so the point estimate matches completion-level NLL aggregation.
+    """
+    if not baseline or len(baseline) != len(candidate):
+        raise ValueError("baseline and candidate must have the same non-zero length")
+    if len(weights) != len(baseline):
+        raise ValueError("weights must have the same length as paired values")
+    if samples < 1:
+        raise ValueError("samples must be at least one")
+    if not 0 < confidence < 1:
+        raise ValueError("confidence must be between zero and one")
+    if not all(math.isfinite(value) for value in baseline + candidate):
+        raise ValueError("bootstrap inputs must contain only finite values")
+    if any(type(weight) is not int or weight < 1 for weight in weights):
+        raise ValueError("weights must be positive integers")
+
+    paired_deltas = [new - old for old, new in zip(baseline, candidate, strict=True)]
+
+    def weighted_delta(indices: list[int]) -> float:
+        selected_weight = sum(weights[index] for index in indices)
+        return sum(paired_deltas[index] * weights[index] for index in indices) / selected_weight
+
+    indices = list(range(len(paired_deltas)))
+    observed_delta = weighted_delta(indices)
+    generator = random.Random(seed)
+    bootstrap_deltas = []
+    for _ in range(samples):
+        bootstrap_deltas.append(weighted_delta([generator.choice(indices) for _ in indices]))
+
+    alpha = 1 - confidence
+    improved = (
+        sum(delta < 0 for delta in bootstrap_deltas)
+        if lower_is_better
+        else sum(delta > 0 for delta in bootstrap_deltas)
+    )
+    return {
+        "observed_delta": observed_delta,
+        "confidence_interval_low": percentile(bootstrap_deltas, alpha / 2),
+        "confidence_interval_high": percentile(bootstrap_deltas, 1 - alpha / 2),
+        "probability_improved": improved / samples,
+        "improvement_direction": "lower" if lower_is_better else "higher",
+        "paired_examples": len(paired_deltas),
+        "paired_tokens": sum(weights),
+        "confidence": confidence,
+        "bootstrap_samples": samples,
+        "seed": seed,
+    }

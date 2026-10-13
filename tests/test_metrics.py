@@ -6,6 +6,7 @@ from gemma_experiment.metrics import (
     exact_match,
     normalize_answer,
     paired_bootstrap_delta,
+    paired_weighted_bootstrap_delta,
     percentile,
     perplexity,
     summarize_generations,
@@ -127,3 +128,57 @@ def test_paired_bootstrap_is_deterministic_and_preserves_pairing():
 def test_paired_bootstrap_rejects_invalid_inputs(baseline, candidate, kwargs, message):
     with pytest.raises(ValueError, match=message):
         paired_bootstrap_delta(baseline, candidate, **kwargs)
+
+
+def test_weighted_bootstrap_matches_token_weighted_loss_delta():
+    result = paired_weighted_bootstrap_delta(
+        [1.0, 1.0],
+        [0.0, 2.0],
+        [9, 1],
+        samples=500,
+        seed=7,
+        lower_is_better=True,
+    )
+
+    assert result["observed_delta"] == pytest.approx(-0.8)
+    assert result["improvement_direction"] == "lower"
+    assert result["paired_examples"] == 2
+    assert result["paired_tokens"] == 10
+    assert result == paired_weighted_bootstrap_delta(
+        [1.0, 1.0],
+        [0.0, 2.0],
+        [9, 1],
+        samples=500,
+        seed=7,
+        lower_is_better=True,
+    )
+
+
+def test_weighted_bootstrap_uses_lower_loss_as_improvement():
+    result = paired_weighted_bootstrap_delta(
+        [1.0, 2.0, 3.0],
+        [0.5, 1.5, 2.5],
+        [5, 10, 20],
+        samples=200,
+        lower_is_better=True,
+    )
+
+    assert result["observed_delta"] == pytest.approx(-0.5)
+    assert result["probability_improved"] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("baseline", "candidate", "weights", "kwargs", "message"),
+    [
+        ([], [], [], {}, "same non-zero length"),
+        ([1.0], [1.0, 2.0], [1], {}, "same non-zero length"),
+        ([1.0], [1.0], [], {}, "weights must have the same length"),
+        ([1.0], [1.0], [0], {}, "positive integers"),
+        ([1.0], [math.nan], [1], {}, "finite values"),
+        ([1.0], [1.0], [1], {"samples": 0}, "at least one"),
+        ([1.0], [1.0], [1], {"confidence": 1.0}, "between zero and one"),
+    ],
+)
+def test_weighted_bootstrap_rejects_invalid_inputs(baseline, candidate, weights, kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        paired_weighted_bootstrap_delta(baseline, candidate, weights, **kwargs)
