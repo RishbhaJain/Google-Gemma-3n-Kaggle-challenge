@@ -8,12 +8,14 @@ The result artifact records:
 
 - the SHA-256 hashes of the data manifest and untouched test split;
 - the exact base-model commit and SHA-256 hash of the pinned PEFT adapter config;
-- completion-only negative log-likelihood and perplexity over all 300 test examples;
+- completion-only negative log-likelihood and perplexity over all 300 test examples,
+  with a seeded paired, token-weighted bootstrap interval for the primary loss delta;
 - exact match and token F1 as secondary reference-overlap diagnostics, with seeded
   paired-bootstrap confidence intervals for the QLoRA-minus-base deltas;
 - warm-up-excluded p50/p95 greedy-generation latency, request and token throughput,
   model-load time, and steady-state peak GPU memory;
-- content-free per-request prompt/output token counts and synchronized timings;
+- content-free per-example loss/token records plus per-request prompt/output token
+  counts and synchronized timings;
 - base-to-adapter deltas, experiment configuration, and hardware/software versions.
 
 The checked-in contract requires CUDA and excludes three warm-up requests per

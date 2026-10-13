@@ -32,10 +32,11 @@ tokens, and removed prompt tokens.
 The base model is loaded from a full commit SHA rather than mutable `main`. The
 same revision is written into and verified from the PEFT `adapter_config.json`,
 so a later adapter evaluation cannot silently resolve different base weights.
-For exact match and token F1, a seeded paired bootstrap resamples the same prompts
-for both variants and reports a 95% confidence interval around the QLoRA-minus-base
-delta. This makes uncertainty visible without treating examples as independent
-across the two model runs.
+For completion loss, exact match, and token F1, a seeded paired bootstrap resamples
+the same prompts for both variants and reports a 95% confidence interval around the
+QLoRA-minus-base delta. Loss resamples retain completion-token weights, so their
+point estimate matches the primary token-level NLL. This makes uncertainty visible
+without treating examples as independent across the two model runs.
 
 ## Run the experiment
 
@@ -85,7 +86,8 @@ request-level token counts and timings behind the aggregates.
 
 No benchmark numbers are filled in without a completed real-model run. The result
 JSON captures hardware and software versions, model-load time, total device memory,
-and request-level benchmark records so later measurements can be audited.
+per-example loss and token counts, and request-level benchmark records so later
+measurements can be audited.
 
 Completion loss and perplexity are the primary quality measures because FineTome
 contains open-ended assistant responses. Exact match and token F1, including their
