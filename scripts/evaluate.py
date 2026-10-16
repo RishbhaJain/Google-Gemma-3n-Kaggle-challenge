@@ -24,10 +24,16 @@ from gemma_experiment.metrics import (
     exact_match,
     paired_bootstrap_delta,
     paired_weighted_bootstrap_delta,
+    paired_weighted_slice_deltas,
     perplexity,
     summarize_generations,
     token_f1,
 )
+
+LENGTH_SLICE_BOUNDARIES = {
+    "original_prompt_tokens": [128, 256, 512],
+    "completion_tokens": [64, 128, 256],
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -89,6 +95,8 @@ def completion_loss(
                 "example_index": example_index,
                 "mean_loss": mean_loss,
                 "scored_tokens": supervised_tokens,
+                "original_prompt_tokens": len(prompt_ids),
+                "completion_tokens": encoded.completion_tokens,
             }
         )
     if total_tokens == 0:
@@ -114,8 +122,30 @@ def validate_paired_loss_records(
     for base_record, candidate_record in zip(baseline, candidate, strict=True):
         if base_record["example_index"] != candidate_record["example_index"]:
             raise ValueError("loss record example indices are not aligned")
-        if base_record["scored_tokens"] != candidate_record["scored_tokens"]:
-            raise ValueError("loss record token counts differ between model variants")
+        for field in ("scored_tokens", "original_prompt_tokens", "completion_tokens"):
+            if base_record[field] != candidate_record[field]:
+                raise ValueError(f"loss record {field} differs between model variants")
+
+
+def build_loss_slice_report(
+    baseline: list[dict[str, float | int]],
+    candidate: list[dict[str, float | int]],
+) -> dict[str, dict[str, object]]:
+    """Expose length-specific loss deltas that an aggregate can conceal."""
+    validate_paired_loss_records(baseline, candidate)
+    base_losses = [float(record["mean_loss"]) for record in baseline]
+    candidate_losses = [float(record["mean_loss"]) for record in candidate]
+    weights = [int(record["scored_tokens"]) for record in baseline]
+    return {
+        field: paired_weighted_slice_deltas(
+            base_losses,
+            candidate_losses,
+            weights,
+            [int(record[field]) for record in baseline],
+            boundaries=boundaries,
+        )
+        for field, boundaries in LENGTH_SLICE_BOUNDARIES.items()
+    }
 
 
 def validate_benchmark_runtime(*, cuda_available: bool, require_cuda: bool) -> None:
@@ -339,6 +369,7 @@ def main() -> None:
                 for metric in ("exact_match", "token_f1")
             },
         },
+        "completion_loss_slices": build_loss_slice_report(base_loss_records, adapter_loss_records),
         "environment": environment,
         "inference_records": {
             "generation": {
@@ -355,7 +386,9 @@ def main() -> None:
             "completion_loss": (
                 "Token-weighted NLL over every assistant completion token. Long prompts are "
                 "left-truncated; completions are never silently truncated. Per-example losses "
-                "receive a paired, token-weighted bootstrap interval; lower deltas are better."
+                "receive a paired, token-weighted bootstrap interval; lower deltas are better. "
+                "Fixed prompt- and completion-length slices expose regressions hidden by the "
+                "aggregate; positive slice deltas indicate worse QLoRA loss."
             ),
             "exact_match_and_f1": (
                 "Reference-overlap diagnostics for open-ended data; interpret with "

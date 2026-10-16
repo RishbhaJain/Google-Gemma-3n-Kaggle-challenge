@@ -10,6 +10,8 @@ The result artifact records:
 - the exact base-model commit and SHA-256 hash of the pinned PEFT adapter config;
 - completion-only negative log-likelihood and perplexity over all 300 test examples,
   with a seeded paired, token-weighted bootstrap interval for the primary loss delta;
+- paired, token-weighted completion-loss deltas across fixed original-prompt and
+  completion-length slices, including the largest observed slice delta;
 - exact match and token F1 as secondary reference-overlap diagnostics, with seeded
   paired-bootstrap confidence intervals for the QLoRA-minus-base deltas;
 - warm-up-excluded p50/p95 greedy-generation latency, request and token throughput,

@@ -7,6 +7,7 @@ from gemma_experiment.metrics import (
     normalize_answer,
     paired_bootstrap_delta,
     paired_weighted_bootstrap_delta,
+    paired_weighted_slice_deltas,
     percentile,
     perplexity,
     summarize_generations,
@@ -182,3 +183,45 @@ def test_weighted_bootstrap_uses_lower_loss_as_improvement():
 def test_weighted_bootstrap_rejects_invalid_inputs(baseline, candidate, weights, kwargs, message):
     with pytest.raises(ValueError, match=message):
         paired_weighted_bootstrap_delta(baseline, candidate, weights, **kwargs)
+
+
+def test_weighted_length_slices_preserve_pairing_and_token_weights():
+    report = paired_weighted_slice_deltas(
+        [1.0, 3.0, 2.0, 4.0],
+        [0.5, 4.0, 1.5, 5.0],
+        [9, 1, 2, 2],
+        [32, 100, 200, 700],
+        boundaries=[128, 256, 512],
+    )
+
+    assert [item["slice"] for item in report["slices"]] == ["1-128", "129-256", "513+"]
+    assert report["slices"][0]["base_mean_loss"] == pytest.approx(1.2)
+    assert report["slices"][0]["candidate_mean_loss"] == pytest.approx(0.85)
+    assert report["slices"][0]["delta_candidate_minus_base"] == pytest.approx(-0.35)
+    assert report["slices"][0]["scored_tokens"] == 10
+    assert report["largest_delta_slice"] == "513+"
+    assert report["largest_delta"] == pytest.approx(1.0)
+    assert report["has_observed_regression"] is True
+
+
+@pytest.mark.parametrize(
+    ("baseline", "candidate", "weights", "slice_values", "boundaries", "message"),
+    [
+        ([], [], [], [], [10], "same non-zero length"),
+        ([1.0], [1.0], [], [1], [10], "must match"),
+        ([1.0], [1.0], [1], [0], [10], "slice values must be positive"),
+        ([1.0], [math.nan], [1], [1], [10], "finite values"),
+        ([1.0], [1.0], [1], [1], [10, 10], "unique, strictly increasing"),
+    ],
+)
+def test_weighted_length_slices_reject_invalid_inputs(
+    baseline, candidate, weights, slice_values, boundaries, message
+):
+    with pytest.raises(ValueError, match=message):
+        paired_weighted_slice_deltas(
+            baseline,
+            candidate,
+            weights,
+            slice_values,
+            boundaries=boundaries,
+        )

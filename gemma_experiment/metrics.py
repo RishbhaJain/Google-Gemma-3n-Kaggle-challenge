@@ -210,3 +210,78 @@ def paired_weighted_bootstrap_delta(
         "bootstrap_samples": samples,
         "seed": seed,
     }
+
+
+def paired_weighted_slice_deltas(
+    baseline: list[float],
+    candidate: list[float],
+    weights: list[int],
+    slice_values: list[int],
+    *,
+    boundaries: list[int],
+) -> dict[str, object]:
+    """Report token-weighted paired deltas in deterministic length buckets.
+
+    The same examples and completion-token weights are retained on both sides,
+    preventing a slice comparison from being distorted by different samples or
+    response lengths. Positive loss deltas indicate a candidate regression.
+    """
+    if not baseline or len(baseline) != len(candidate):
+        raise ValueError("baseline and candidate must have the same non-zero length")
+    if len(weights) != len(baseline) or len(slice_values) != len(baseline):
+        raise ValueError("weights and slice values must match the paired values")
+    if not all(math.isfinite(value) for value in baseline + candidate):
+        raise ValueError("slice inputs must contain only finite values")
+    if any(type(weight) is not int or weight < 1 for weight in weights):
+        raise ValueError("weights must be positive integers")
+    if any(type(value) is not int or value < 1 for value in slice_values):
+        raise ValueError("slice values must be positive integers")
+    if (
+        not boundaries
+        or any(type(boundary) is not int or boundary < 1 for boundary in boundaries)
+        or boundaries != sorted(set(boundaries))
+    ):
+        raise ValueError("boundaries must be unique, strictly increasing positive integers")
+
+    groups: list[list[int]] = [[] for _ in range(len(boundaries) + 1)]
+    for index, value in enumerate(slice_values):
+        bucket = next(
+            (position for position, boundary in enumerate(boundaries) if value <= boundary),
+            len(boundaries),
+        )
+        groups[bucket].append(index)
+
+    labels = [f"1-{boundaries[0]}"]
+    labels.extend(
+        f"{lower + 1}-{upper}" for lower, upper in zip(boundaries[:-1], boundaries[1:], strict=True)
+    )
+    labels.append(f"{boundaries[-1] + 1}+")
+
+    slices = []
+    for label, indices in zip(labels, groups, strict=True):
+        if not indices:
+            continue
+        token_count = sum(weights[index] for index in indices)
+        base_loss = sum(baseline[index] * weights[index] for index in indices) / token_count
+        candidate_loss = sum(candidate[index] * weights[index] for index in indices) / token_count
+        slices.append(
+            {
+                "slice": label,
+                "examples": len(indices),
+                "scored_tokens": token_count,
+                "observed_min": min(slice_values[index] for index in indices),
+                "observed_max": max(slice_values[index] for index in indices),
+                "base_mean_loss": base_loss,
+                "candidate_mean_loss": candidate_loss,
+                "delta_candidate_minus_base": candidate_loss - base_loss,
+            }
+        )
+
+    largest_delta = max(slices, key=lambda item: item["delta_candidate_minus_base"])
+    return {
+        "boundaries": boundaries,
+        "slices": slices,
+        "largest_delta_slice": largest_delta["slice"],
+        "largest_delta": largest_delta["delta_candidate_minus_base"],
+        "has_observed_regression": largest_delta["delta_candidate_minus_base"] > 0,
+    }
