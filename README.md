@@ -37,6 +37,10 @@ the same prompts for both variants and reports a 95% confidence interval around 
 QLoRA-minus-base delta. Loss resamples retain completion-token weights, so their
 point estimate matches the primary token-level NLL. This makes uncertainty visible
 without treating examples as independent across the two model runs.
+The same paired loss records are also broken into fixed prompt- and completion-length
+slices. Each populated slice reports its example count, scored tokens, both weighted
+losses, and the QLoRA-minus-base delta, plus the largest observed delta. This catches
+length-specific regressions that an improved aggregate score could otherwise hide.
 
 ## Run the experiment
 
