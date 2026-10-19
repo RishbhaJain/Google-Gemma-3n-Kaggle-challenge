@@ -52,7 +52,7 @@ def test_fingerprint_is_canonical_and_changes_with_configuration():
         (("training", "per_device_train_batch_size"), True, "must be an integer"),
         (("training", "save_steps"), 15, "divisible by eval_steps"),
         (("evaluation", "generation_examples"), 301, "must not exceed"),
-        (("evaluation", "warmup_examples"), 101, "must not exceed"),
+        (("evaluation", "warmup_examples"), 201, "must not exceed"),
         (("evaluation", "require_cuda"), "yes", "must be a boolean"),
         (("evaluation", "max_new_tokens"), 1024, "must be smaller"),
         (("lora", "dropout"), 1.0, "must be <"),

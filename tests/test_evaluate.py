@@ -2,6 +2,7 @@ import pytest
 
 from scripts.evaluate import (
     build_loss_slice_report,
+    select_generation_examples,
     validate_benchmark_runtime,
     validate_paired_loss_records,
 )
@@ -15,6 +16,25 @@ def test_gpu_benchmark_fails_closed_without_cuda():
 @pytest.mark.parametrize("cuda_available", [False, True])
 def test_runtime_contract_allows_explicit_non_gpu_runs(cuda_available):
     validate_benchmark_runtime(cuda_available=cuda_available, require_cuda=False)
+
+
+def test_generation_warmups_are_disjoint_from_measured_examples():
+    examples = [{"source_index": index} for index in range(7)]
+
+    warmups, measured = select_generation_examples(examples, measured_count=4, warmup_count=2)
+
+    assert [item["source_index"] for item in warmups] == [4, 5]
+    assert [item["source_index"] for item in measured] == [0, 1, 2, 3]
+    assert not {id(item) for item in warmups} & {id(item) for item in measured}
+
+
+def test_generation_rejects_insufficient_disjoint_examples():
+    with pytest.raises(ValueError, match="too few examples"):
+        select_generation_examples(
+            [{"source_index": index} for index in range(4)],
+            measured_count=3,
+            warmup_count=2,
+        )
 
 
 def test_paired_loss_records_require_identical_examples_and_token_counts():

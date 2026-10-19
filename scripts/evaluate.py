@@ -158,6 +158,20 @@ def validate_benchmark_runtime(*, cuda_available: bool, require_cuda: bool) -> N
         )
 
 
+def select_generation_examples(
+    examples: list[dict[str, Any]], *, measured_count: int, warmup_count: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep untimed warm-ups separate from measured held-out prompts."""
+    if measured_count < 1 or warmup_count < 1:
+        raise ValueError("measured_count and warmup_count must be positive")
+    if measured_count + warmup_count > len(examples):
+        raise ValueError("test split has too few examples for disjoint warm-up requests")
+    return (
+        examples[measured_count : measured_count + warmup_count],
+        examples[:measured_count],
+    )
+
+
 def evaluate_variant(
     *,
     model_path: str,
@@ -237,13 +251,16 @@ def evaluate_variant(
             "generated_tokens": float(len(generated_ids)),
         }
 
-    for example in examples[:warmup_examples]:
+    warmup_cases, measured_cases = select_generation_examples(
+        examples, measured_count=generation_examples, warmup_count=warmup_examples
+    )
+    for example in warmup_cases:
         generate_record(example)
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
 
     records = []
-    for index, example in enumerate(examples[:generation_examples]):
+    for index, example in enumerate(measured_cases):
         records.append({"example_index": float(index), **generate_record(example)})
 
     metrics = summarize_generations(records)
@@ -256,7 +273,7 @@ def evaluate_variant(
             "completion_loss_tokens": loss_summary["scored_tokens"],
             "left_truncated_prompt_tokens": loss_summary["removed_prompt_tokens"],
             "generation_examples": len(records),
-            "warmup_examples": warmup_examples,
+            "warmup_examples": len(warmup_cases),
             "model_load_seconds": model_load_seconds,
             "peak_gpu_memory_gib": (
                 torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
@@ -306,7 +323,7 @@ def main() -> None:
     common = {
         "examples": examples,
         "max_length": model_config["max_sequence_length"],
-        "generation_examples": min(eval_config["generation_examples"], len(examples)),
+        "generation_examples": eval_config["generation_examples"],
         "warmup_examples": eval_config["warmup_examples"],
         "max_new_tokens": eval_config["max_new_tokens"],
         "load_in_4bit": model_config["load_in_4bit"],
@@ -398,6 +415,7 @@ def main() -> None:
             "latency": (
                 "Steady-state greedy generation at batch size one on a single CUDA host. "
                 "Configured warm-up requests are excluded from latency and throughput. "
+                "Warm-up prompts are disjoint from measured prompts. "
                 "CUDA synchronization brackets every timed request; request-level token "
                 "counts and timings are retained for audit."
             ),
