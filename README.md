@@ -73,7 +73,8 @@ audit command can recheck prepared files. The training script writes the adapter
 and a machine-readable training summary to `artifacts/gemma-3n-qlora/`. The
 evaluation script writes `results/base_vs_qlora.json`. Its benchmark fails closed
 when CUDA is unavailable, runs three untimed warm-up requests per variant,
-synchronizes CUDA around every measured generation, and retains content-free
+sourced from test examples outside the measured set, synchronizes CUDA around
+every measured generation, and retains content-free
 request-level token counts and timings behind the aggregates.
 
 ## Held-out results

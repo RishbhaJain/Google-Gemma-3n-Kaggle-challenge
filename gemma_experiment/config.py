@@ -192,9 +192,10 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
     if generation_examples > test_size:
         raise ConfigValidationError("evaluation.generation_examples must not exceed data.test_size")
     warmup_examples = _integer(evaluation.get("warmup_examples"), "evaluation.warmup_examples")
-    if warmup_examples > generation_examples:
+    if warmup_examples + generation_examples > test_size:
         raise ConfigValidationError(
-            "evaluation.warmup_examples must not exceed evaluation.generation_examples"
+            "evaluation.warmup_examples + evaluation.generation_examples "
+            "must not exceed data.test_size"
         )
     _boolean(evaluation.get("require_cuda"), "evaluation.require_cuda")
     max_new_tokens = _integer(evaluation.get("max_new_tokens"), "evaluation.max_new_tokens")
