@@ -28,12 +28,11 @@ def main() -> None:
 
     dataset = load_dataset(
         data_config["dataset"],
-        split=f"{data_config['source_split']}[:{data_config['sample_size']}]",
+        split=data_config["source_split"],
         revision=data_config["revision"],
     )
-    rows = [dataset[index] for index in range(len(dataset))]
     splits = deterministic_split(
-        rows,
+        dataset,
         train_size=data_config["train_size"],
         validation_size=data_config["validation_size"],
         test_size=data_config["test_size"],
@@ -68,6 +67,7 @@ def main() -> None:
         "dataset": data_config["dataset"],
         "dataset_revision": data_config["revision"],
         "source_split": data_config["source_split"],
+        "source_rows": len(dataset),
         "sample_size": data_config["sample_size"],
         "seed": data_config["seed"],
         "dataset_fingerprint": getattr(dataset, "_fingerprint", None),

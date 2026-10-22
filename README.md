@@ -12,14 +12,16 @@ notebook.
 |---|---|
 | Base model | `unsloth/gemma-3n-E4B-it` at commit `45e9fb1dd0e34db5ff9db1f43a49ac5d8e8b8778`, 4-bit loading |
 | Dataset | `mlabonne/FineTome-100k` at revision `c2343c1372ff31f51aa21248db18bffa3193efdb` |
-| Split | Seeded 2,400 train / 300 validation / 300 held-out test |
+| Split | Seeded full-corpus sample: 2,400 train / 300 validation / 300 held-out test |
 | QLoRA | Rank 8, alpha 8, language attention and MLP modules |
 | Training | 60 steps, effective batch size 4, learning rate 2e-4 |
 | Selection | Lowest validation completion loss, evaluated every 10 steps |
 | Final comparison | Completion NLL/perplexity, paired quality intervals, warm-up-aware latency, throughput, peak VRAM |
 
-The dataset manifest stores split checksums, the source revision, dataset
-fingerprint, seed, and row counts. Data preparation also fails closed when
+The dataset manifest stores split checksums, the source revision, full source row
+count, dataset fingerprint, seed, and row counts. The 3,000 examples are sampled
+across the full pinned source split rather than taken from its leading rows, avoiding
+ordering bias while preserving stable source indices. Data preparation also fails closed when
 normalized exact duplicates or high-similarity prompt shingles cross split
 boundaries. The content-safe audit records only split names, source indices, and
 similarity scores, never dataset text. Training never sees the test split. Both model
