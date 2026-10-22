@@ -62,6 +62,21 @@ def test_split_is_seeded_disjoint_and_has_expected_sizes():
     assert source_sets[1].isdisjoint(source_sets[2])
 
 
+def test_split_samples_across_the_full_source_instead_of_its_prefix():
+    split = deterministic_split(
+        rows(100),
+        train_size=8,
+        validation_size=2,
+        test_size=2,
+        seed=7,
+    )
+
+    selected = {item["source_index"] for examples in split.values() for item in examples}
+    assert len(selected) == 12
+    assert selected != set(range(12))
+    assert max(selected) >= 12
+
+
 def test_split_rejects_insufficient_rows():
     with pytest.raises(ValueError, match="Need 13"):
         deterministic_split(rows(), train_size=9, validation_size=2, test_size=2, seed=7)
