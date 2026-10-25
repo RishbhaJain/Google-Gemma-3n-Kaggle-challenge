@@ -12,6 +12,7 @@ from pathlib import Path
 from gemma_experiment.config import load_config
 from gemma_experiment.integrity import (
     pin_adapter_base_revision,
+    validate_artifact_config,
     validate_model_revision,
     validate_split_checksum,
 )
@@ -42,6 +43,9 @@ def main() -> None:
     manifest_path = data_dir / "manifest.json"
     if not manifest_path.exists():
         raise FileNotFoundError(f"Missing data manifest {manifest_path}; run prepare_data.py first")
+    dataset_manifest_sha256 = validate_artifact_config(
+        manifest_path, config_report["config_sha256"]
+    )
     data_files = {split: str(data_dir / f"{split}.jsonl") for split in ("train", "validation")}
     for split, path in data_files.items():
         if not Path(path).exists():
@@ -129,6 +133,7 @@ def main() -> None:
         "adapter_dir": str(adapter_dir),
         "adapter_config_sha256": adapter_config_sha256,
         "experiment_config_sha256": config_report["config_sha256"],
+        "dataset_manifest_sha256": dataset_manifest_sha256,
         "run_budget": config_report["derived"],
         "train_examples": len(dataset["train"]),
         "validation_examples": len(dataset["validation"]),

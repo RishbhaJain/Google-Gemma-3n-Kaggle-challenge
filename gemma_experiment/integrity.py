@@ -78,6 +78,25 @@ def validate_split_checksum(split_path: Path, manifest_path: Path, split_name: s
     return actual
 
 
+def validate_artifact_config(metadata_path: Path, expected_config_sha256: str) -> str:
+    """Verify that an artifact belongs to the active experiment contract."""
+    if not metadata_path.exists():
+        raise FileNotFoundError(f"Missing artifact metadata: {metadata_path}")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid artifact metadata JSON: {metadata_path}") from exc
+    if not isinstance(metadata, dict):
+        raise ValueError(f"Artifact metadata must be a JSON object: {metadata_path}")
+    actual = metadata.get("experiment_config_sha256")
+    if actual != expected_config_sha256:
+        raise ValueError(
+            f"Artifact config mismatch for {metadata_path}: "
+            f"expected {expected_config_sha256}, found {actual!r}"
+        )
+    return sha256_file(metadata_path)
+
+
 def build_completion_encoding(
     prompt_ids: Sequence[int], full_ids: Sequence[int], max_length: int
 ) -> CompletionEncoding:

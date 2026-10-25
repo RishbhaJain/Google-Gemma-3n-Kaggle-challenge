@@ -34,6 +34,11 @@ tokens, and removed prompt tokens.
 The base model is loaded from a full commit SHA rather than mutable `main`. The
 same revision is written into and verified from the PEFT `adapter_config.json`,
 so a later adapter evaluation cannot silently resolve different base weights.
+Training also rejects a data manifest produced under a different canonical
+experiment fingerprint. Evaluation applies the same check to both the manifest
+and the adapter's training summary, so stale data or weights cannot be reported
+under newer hyperparameters. Their metadata checksums are retained in downstream
+results for provenance.
 For completion loss, exact match, and token F1, a seeded paired bootstrap resamples
 the same prompts for both variants and reports a 95% confidence interval around the
 QLoRA-minus-base delta. Loss resamples retain completion-token weights, so their

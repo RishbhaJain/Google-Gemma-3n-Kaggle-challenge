@@ -8,9 +8,36 @@ from gemma_experiment.integrity import (
     build_completion_encoding,
     pin_adapter_base_revision,
     validate_adapter_base_revision,
+    validate_artifact_config,
     validate_model_revision,
     validate_split_checksum,
 )
+
+
+def test_artifact_config_validation_binds_metadata_to_experiment(tmp_path: Path):
+    metadata_path = tmp_path / "training_summary.json"
+    metadata_path.write_text(json.dumps({"experiment_config_sha256": "a" * 64}), encoding="utf-8")
+
+    assert validate_artifact_config(metadata_path, "a" * 64) == sha256_file(metadata_path)
+
+    with pytest.raises(ValueError, match="Artifact config mismatch"):
+        validate_artifact_config(metadata_path, "b" * 64)
+
+
+def test_artifact_config_validation_rejects_missing_and_invalid_metadata(tmp_path: Path):
+    with pytest.raises(FileNotFoundError, match="Missing artifact metadata"):
+        validate_artifact_config(tmp_path / "missing.json", "a" * 64)
+
+    invalid_path = tmp_path / "invalid.json"
+    invalid_path.write_text("{not-json}", encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid artifact metadata JSON"):
+        validate_artifact_config(invalid_path, "a" * 64)
+
+    list_path = tmp_path / "list.json"
+    list_path.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        validate_artifact_config(list_path, "a" * 64)
+
 
 MODEL_REVISION = "45e9fb1dd0e34db5ff9db1f43a49ac5d8e8b8778"
 
