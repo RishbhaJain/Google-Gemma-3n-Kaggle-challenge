@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Any
 
 from gemma_experiment.config import load_config
-from gemma_experiment.data import read_jsonl, sha256_file
+from gemma_experiment.data import read_jsonl
 from gemma_experiment.integrity import (
     build_completion_encoding,
     validate_adapter_base_revision,
+    validate_artifact_config,
     validate_model_revision,
     validate_split_checksum,
 )
@@ -314,9 +315,15 @@ def main() -> None:
     for path in (test_path, manifest_path, adapter_path):
         if not path.exists():
             raise FileNotFoundError(f"Required experiment artifact does not exist: {path}")
+    dataset_manifest_sha256 = validate_artifact_config(
+        manifest_path, config_report["config_sha256"]
+    )
     test_split_sha256 = validate_split_checksum(test_path, manifest_path, "test")
     adapter_config_sha256 = validate_adapter_base_revision(
         adapter_path, model_config["name"], model_revision
+    )
+    training_summary_sha256 = validate_artifact_config(
+        adapter_path / "training_summary.json", config_report["config_sha256"]
     )
     examples = read_jsonl(test_path)
 
@@ -344,7 +351,7 @@ def main() -> None:
 
     result = {
         "completed_at_utc": datetime.now(UTC).isoformat(),
-        "dataset_manifest_sha256": sha256_file(manifest_path),
+        "dataset_manifest_sha256": dataset_manifest_sha256,
         "experiment_config_sha256": config_report["config_sha256"],
         "run_budget": config_report["derived"],
         "test_split_sha256": test_split_sha256,
@@ -352,6 +359,7 @@ def main() -> None:
         "base_model_revision": model_revision,
         "adapter": str(adapter_path),
         "adapter_config_sha256": adapter_config_sha256,
+        "training_summary_sha256": training_summary_sha256,
         "base": base_metrics,
         "qlora": adapter_metrics,
         "delta": {
