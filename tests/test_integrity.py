@@ -5,8 +5,10 @@ import pytest
 
 from gemma_experiment.data import sha256_file
 from gemma_experiment.integrity import (
+    adapter_artifact_sha256,
     build_completion_encoding,
     pin_adapter_base_revision,
+    validate_adapter_artifact,
     validate_adapter_base_revision,
     validate_artifact_config,
     validate_model_revision,
@@ -140,6 +142,59 @@ def test_adapter_revision_requires_config_file(tmp_path: Path):
         validate_adapter_base_revision(
             tmp_path / "missing", "unsloth/gemma-3n-E4B-it", MODEL_REVISION
         )
+
+
+def test_adapter_artifact_fingerprint_binds_paths_and_file_contents(tmp_path: Path):
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter_config.json").write_text('{"rank": 8}\n', encoding="utf-8")
+    (adapter_dir / "adapter_model.safetensors").write_bytes(b"original-weights")
+    original = adapter_artifact_sha256(adapter_dir)
+
+    (adapter_dir / "adapter_model.safetensors").write_bytes(b"modified-weights")
+
+    assert adapter_artifact_sha256(adapter_dir) != original
+
+
+def test_adapter_artifact_validation_detects_tampered_weights(tmp_path: Path):
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir()
+    weights_path = adapter_dir / "adapter_model.safetensors"
+    weights_path.write_bytes(b"original-weights")
+    expected = adapter_artifact_sha256(adapter_dir)
+    summary_path = adapter_dir / "training_summary.json"
+    summary_path.write_text(json.dumps({"adapter_artifact_sha256": expected}), encoding="utf-8")
+
+    assert validate_adapter_artifact(adapter_dir, summary_path) == expected
+    assert adapter_artifact_sha256(adapter_dir) == expected
+
+    weights_path.write_bytes(b"tampered-weights")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        validate_adapter_artifact(adapter_dir, summary_path)
+
+
+def test_adapter_artifact_validation_rejects_missing_fingerprint(tmp_path: Path):
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter_model.safetensors").write_bytes(b"weights")
+    summary_path = adapter_dir / "training_summary.json"
+    summary_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no valid adapter artifact"):
+        validate_adapter_artifact(adapter_dir, summary_path)
+
+
+def test_adapter_artifact_fingerprint_excludes_its_training_summary(tmp_path: Path):
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter_model.safetensors").write_bytes(b"weights")
+    before_summary = adapter_artifact_sha256(adapter_dir)
+
+    (adapter_dir / "training_summary.json").write_text(
+        json.dumps({"adapter_artifact_sha256": before_summary}), encoding="utf-8"
+    )
+
+    assert adapter_artifact_sha256(adapter_dir) == before_summary
 
 
 def test_completion_encoding_preserves_full_target_and_left_truncates_prompt():

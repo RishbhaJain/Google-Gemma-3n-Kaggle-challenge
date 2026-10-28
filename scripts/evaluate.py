@@ -16,6 +16,7 @@ from gemma_experiment.config import load_config
 from gemma_experiment.data import read_jsonl
 from gemma_experiment.integrity import (
     build_completion_encoding,
+    validate_adapter_artifact,
     validate_adapter_base_revision,
     validate_artifact_config,
     validate_model_revision,
@@ -325,6 +326,9 @@ def main() -> None:
     training_summary_sha256 = validate_artifact_config(
         adapter_path / "training_summary.json", config_report["config_sha256"]
     )
+    adapter_artifact_sha256 = validate_adapter_artifact(
+        adapter_path, adapter_path / "training_summary.json"
+    )
     examples = read_jsonl(test_path)
 
     common = {
@@ -359,6 +363,7 @@ def main() -> None:
         "base_model_revision": model_revision,
         "adapter": str(adapter_path),
         "adapter_config_sha256": adapter_config_sha256,
+        "adapter_artifact_sha256": adapter_artifact_sha256,
         "training_summary_sha256": training_summary_sha256,
         "base": base_metrics,
         "qlora": adapter_metrics,

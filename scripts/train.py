@@ -11,6 +11,7 @@ from pathlib import Path
 
 from gemma_experiment.config import load_config
 from gemma_experiment.integrity import (
+    adapter_artifact_sha256,
     pin_adapter_base_revision,
     validate_artifact_config,
     validate_model_revision,
@@ -121,6 +122,7 @@ def main() -> None:
     adapter_config_sha256 = pin_adapter_base_revision(
         adapter_dir, model_config["name"], model_revision
     )
+    adapter_sha256 = adapter_artifact_sha256(adapter_dir)
 
     trainable_parameters = sum(
         parameter.numel() for parameter in model.parameters() if parameter.requires_grad
@@ -132,6 +134,7 @@ def main() -> None:
         "model_revision": model_revision,
         "adapter_dir": str(adapter_dir),
         "adapter_config_sha256": adapter_config_sha256,
+        "adapter_artifact_sha256": adapter_sha256,
         "experiment_config_sha256": config_report["config_sha256"],
         "dataset_manifest_sha256": dataset_manifest_sha256,
         "run_budget": config_report["derived"],
