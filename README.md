@@ -39,6 +39,10 @@ experiment fingerprint. Evaluation applies the same check to both the manifest
 and the adapter's training summary, so stale data or weights cannot be reported
 under newer hyperparameters. Their metadata checksums are retained in downstream
 results for provenance.
+The training summary also fingerprints every saved adapter and tokenizer file.
+Evaluation recomputes that directory fingerprint before loading the model, so
+modified, incomplete, or mixed-run weights fail closed instead of being reported
+under the original training metadata.
 For completion loss, exact match, and token F1, a seeded paired bootstrap resamples
 the same prompts for both variants and reports a 95% confidence interval around the
 QLoRA-minus-base delta. Loss resamples retain completion-token weights, so their

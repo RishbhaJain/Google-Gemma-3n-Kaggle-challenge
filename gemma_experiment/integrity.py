@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Sequence
@@ -11,6 +12,8 @@ from pathlib import Path
 from gemma_experiment.data import sha256_file
 
 FULL_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+FULL_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+TRAINING_SUMMARY_NAME = "training_summary.json"
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,53 @@ def validate_adapter_base_revision(
             f"{expected_revision}, found {config.get('revision')!r}"
         )
     return sha256_file(config_path)
+
+
+def adapter_artifact_sha256(adapter_dir: Path) -> str:
+    """Fingerprint every saved adapter artifact except its self-referential summary."""
+    if not adapter_dir.is_dir():
+        raise FileNotFoundError(f"Missing adapter directory: {adapter_dir}")
+
+    files: list[tuple[str, Path]] = []
+    for path in adapter_dir.rglob("*"):
+        relative_path = path.relative_to(adapter_dir).as_posix()
+        if path.is_symlink():
+            raise ValueError(f"Adapter artifact must not contain symlinks: {relative_path}")
+        if path.is_file() and relative_path != TRAINING_SUMMARY_NAME:
+            files.append((relative_path, path))
+    if not files:
+        raise ValueError(f"Adapter directory contains no artifact files: {adapter_dir}")
+
+    digest = hashlib.sha256()
+    for relative_path, path in sorted(files):
+        path_bytes = relative_path.encode("utf-8")
+        digest.update(len(path_bytes).to_bytes(8, "big"))
+        digest.update(path_bytes)
+        digest.update(path.stat().st_size.to_bytes(8, "big"))
+        with path.open("rb") as artifact:
+            for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_adapter_artifact(adapter_dir: Path, training_summary_path: Path) -> str:
+    """Fail closed if saved adapter files differ from the post-training fingerprint."""
+    if not training_summary_path.exists():
+        raise FileNotFoundError(f"Missing training summary: {training_summary_path}")
+    try:
+        summary = json.loads(training_summary_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid training summary JSON: {training_summary_path}") from exc
+    if not isinstance(summary, dict):
+        raise ValueError(f"Training summary must be a JSON object: {training_summary_path}")
+
+    expected = summary.get("adapter_artifact_sha256")
+    if not isinstance(expected, str) or not FULL_SHA256.fullmatch(expected):
+        raise ValueError("Training summary has no valid adapter artifact SHA-256")
+    actual = adapter_artifact_sha256(adapter_dir)
+    if actual != expected:
+        raise ValueError(f"Adapter artifact checksum mismatch: expected {expected}, found {actual}")
+    return actual
 
 
 def validate_split_checksum(split_path: Path, manifest_path: Path, split_name: str) -> str:
