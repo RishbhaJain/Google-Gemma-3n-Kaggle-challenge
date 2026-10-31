@@ -129,6 +129,20 @@ def validate_paired_loss_records(
                 raise ValueError(f"loss record {field} differs between model variants")
 
 
+def validate_paired_generation_records(
+    baseline: list[dict[str, float]],
+    candidate: list[dict[str, float]],
+) -> None:
+    """Fail closed if latency records do not refer to identical input prompts."""
+    if not baseline or len(baseline) != len(candidate):
+        raise ValueError("generation records must have the same non-zero length")
+    for base_record, candidate_record in zip(baseline, candidate, strict=True):
+        if base_record["example_index"] != candidate_record["example_index"]:
+            raise ValueError("generation record example indices are not aligned")
+        if base_record["prompt_tokens"] != candidate_record["prompt_tokens"]:
+            raise ValueError("generation record prompt_tokens differs between model variants")
+
+
 def build_loss_slice_report(
     baseline: list[dict[str, float | int]],
     candidate: list[dict[str, float | int]],
@@ -346,6 +360,7 @@ def main() -> None:
     adapter_metrics, _, adapter_records, adapter_loss_records = evaluate_variant(
         model_path=str(adapter_path), **common
     )
+    validate_paired_generation_records(base_records, adapter_records)
     validate_paired_loss_records(base_loss_records, adapter_loss_records)
     bootstrap_options = {
         "confidence": eval_config["bootstrap_confidence"],
@@ -398,6 +413,12 @@ def main() -> None:
                 )
                 for metric in ("exact_match", "token_f1")
             },
+            "latency_seconds": paired_bootstrap_delta(
+                [record["latency_seconds"] for record in base_records],
+                [record["latency_seconds"] for record in adapter_records],
+                lower_is_better=True,
+                **bootstrap_options,
+            ),
         },
         "completion_loss_slices": build_loss_slice_report(base_loss_records, adapter_loss_records),
         "environment": environment,
@@ -430,7 +451,8 @@ def main() -> None:
                 "Configured warm-up requests are excluded from latency and throughput. "
                 "Warm-up prompts are disjoint from measured prompts. "
                 "CUDA synchronization brackets every timed request; request-level token "
-                "counts and timings are retained for audit."
+                "counts and timings are retained for audit. A paired bootstrap interval "
+                "quantifies the QLoRA-minus-base request-latency delta; lower is better."
             ),
         },
     }

@@ -112,12 +112,15 @@ def paired_bootstrap_delta(
     confidence: float = 0.95,
     samples: int = 2_000,
     seed: int = 3407,
-) -> dict[str, float | int]:
+    lower_is_better: bool = False,
+) -> dict[str, float | int | str]:
     """Estimate a paired mean delta and percentile confidence interval.
 
     Pairing keeps each prompt's base and adapter scores together during
     resampling, so example difficulty is not mistaken for model variance.
-    Positive deltas indicate that the candidate performed better.
+    The delta is always candidate minus baseline. Improvement probability follows
+    the declared metric direction, so latency and loss can use lower-is-better
+    semantics without reversing the reported delta.
     """
     if not baseline or len(baseline) != len(candidate):
         raise ValueError("baseline and candidate must have the same non-zero length")
@@ -138,11 +141,17 @@ def paired_bootstrap_delta(
         )
 
     alpha = 1 - confidence
+    improved = (
+        sum(delta < 0 for delta in bootstrap_deltas)
+        if lower_is_better
+        else sum(delta > 0 for delta in bootstrap_deltas)
+    )
     return {
         "observed_delta": observed_delta,
         "confidence_interval_low": percentile(bootstrap_deltas, alpha / 2),
         "confidence_interval_high": percentile(bootstrap_deltas, 1 - alpha / 2),
-        "probability_improved": sum(delta > 0 for delta in bootstrap_deltas) / samples,
+        "probability_improved": improved / samples,
+        "improvement_direction": "lower" if lower_is_better else "higher",
         "paired_examples": len(paired_deltas),
         "confidence": confidence,
         "bootstrap_samples": samples,
