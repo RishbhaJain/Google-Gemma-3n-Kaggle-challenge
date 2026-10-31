@@ -116,6 +116,20 @@ def test_paired_bootstrap_is_deterministic_and_preserves_pairing():
     )
 
 
+def test_paired_bootstrap_uses_lower_latency_as_improvement():
+    result = paired_bootstrap_delta(
+        [1.0, 2.0, 3.0],
+        [0.5, 1.5, 2.5],
+        samples=200,
+        seed=7,
+        lower_is_better=True,
+    )
+
+    assert result["observed_delta"] == pytest.approx(-0.5)
+    assert result["probability_improved"] == 1.0
+    assert result["improvement_direction"] == "lower"
+
+
 @pytest.mark.parametrize(
     ("baseline", "candidate", "kwargs", "message"),
     [

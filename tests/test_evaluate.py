@@ -4,6 +4,7 @@ from scripts.evaluate import (
     build_loss_slice_report,
     select_generation_examples,
     validate_benchmark_runtime,
+    validate_paired_generation_records,
     validate_paired_loss_records,
 )
 
@@ -67,6 +68,37 @@ def test_paired_loss_records_require_identical_examples_and_token_counts():
         validate_paired_loss_records(
             records,
             [{**records[0], "example_index": 1}, records[1]],
+        )
+
+
+def test_paired_generation_records_require_identical_inputs():
+    records = [
+        {
+            "example_index": 0.0,
+            "latency_seconds": 1.0,
+            "prompt_tokens": 64.0,
+            "generated_tokens": 8.0,
+        },
+        {
+            "example_index": 1.0,
+            "latency_seconds": 2.0,
+            "prompt_tokens": 128.0,
+            "generated_tokens": 12.0,
+        },
+    ]
+
+    validate_paired_generation_records(records, [dict(record) for record in records])
+
+    with pytest.raises(ValueError, match="indices are not aligned"):
+        validate_paired_generation_records(
+            records,
+            [{**records[0], "example_index": 1.0}, records[1]],
+        )
+
+    with pytest.raises(ValueError, match="prompt_tokens differs"):
+        validate_paired_generation_records(
+            records,
+            [records[0], {**records[1], "prompt_tokens": 127.0}],
         )
 
 
