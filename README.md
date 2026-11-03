@@ -16,7 +16,7 @@ notebook.
 | QLoRA | Rank 8, alpha 8, language attention and MLP modules |
 | Training | 60 steps, effective batch size 4, learning rate 2e-4 |
 | Selection | Lowest validation completion loss, evaluated every 10 steps |
-| Final comparison | Completion NLL/perplexity, paired quality intervals, warm-up-aware latency, throughput, peak VRAM |
+| Final comparison | Completion NLL/perplexity, paired quality intervals, warm-up-aware latency, throughput, allocated and reserved VRAM peaks |
 
 The dataset manifest stores split checksums, the source revision, full source row
 count, dataset fingerprint, seed, and row counts. The 3,000 examples are sampled
@@ -89,6 +89,10 @@ when CUDA is unavailable, runs three untimed warm-up requests per variant,
 sourced from test examples outside the measured set, synchronizes CUDA around
 every measured generation, and retains content-free
 request-level token counts and timings behind the aggregates.
+It resets CUDA peak counters after warm-up and reports both live-tensor allocation
+and caching-allocator reservation peaks. Their difference makes allocator overhead
+visible for deployment capacity planning instead of understating the process's VRAM
+footprint.
 
 ## Held-out results
 
@@ -100,7 +104,8 @@ request-level token counts and timings behind the aggregates.
 | p50 generation latency | pending GPU run | pending GPU run | pending |
 | p95 generation latency | pending GPU run | pending GPU run | pending |
 | Generation throughput | pending GPU run | pending GPU run | pending |
-| Peak GPU memory | pending GPU run | pending GPU run | pending |
+| Peak GPU allocated memory | pending GPU run | pending GPU run | pending |
+| Peak GPU reserved memory | pending GPU run | pending GPU run | pending |
 
 No benchmark numbers are filled in without a completed real-model run. The result
 JSON captures hardware and software versions, model-load time, total device memory,

@@ -174,6 +174,34 @@ def validate_benchmark_runtime(*, cuda_available: bool, require_cuda: bool) -> N
         )
 
 
+def summarize_peak_gpu_memory(cuda: Any) -> dict[str, float]:
+    """Report both tensor allocation and allocator reservation pressure.
+
+    PyTorch's caching allocator can reserve substantially more device memory than
+    live tensors occupy. Deployment capacity planning therefore needs both peaks:
+    allocated bytes describe the workload, while reserved bytes describe the
+    process footprint that competes for VRAM.
+    """
+    if not cuda.is_available():
+        return {
+            "peak_gpu_allocated_gib": 0.0,
+            "peak_gpu_reserved_gib": 0.0,
+            "peak_gpu_allocator_overhead_gib": 0.0,
+        }
+    allocated_bytes = int(cuda.max_memory_allocated())
+    reserved_bytes = int(cuda.max_memory_reserved())
+    if allocated_bytes < 0 or reserved_bytes < allocated_bytes:
+        raise RuntimeError(
+            "Invalid CUDA peak-memory counters: reserved bytes must be at least allocated bytes"
+        )
+    gibibyte = 1024**3
+    return {
+        "peak_gpu_allocated_gib": allocated_bytes / gibibyte,
+        "peak_gpu_reserved_gib": reserved_bytes / gibibyte,
+        "peak_gpu_allocator_overhead_gib": (reserved_bytes - allocated_bytes) / gibibyte,
+    }
+
+
 def select_generation_examples(
     examples: list[dict[str, Any]], *, measured_count: int, warmup_count: int
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -291,9 +319,7 @@ def evaluate_variant(
             "generation_examples": len(records),
             "warmup_examples": len(warmup_cases),
             "model_load_seconds": model_load_seconds,
-            "peak_gpu_memory_gib": (
-                torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
-            ),
+            **summarize_peak_gpu_memory(torch.cuda),
         }
     )
     environment = {
@@ -394,7 +420,9 @@ def main() -> None:
                 "tokens_per_second",
                 "requests_per_second",
                 "model_load_seconds",
-                "peak_gpu_memory_gib",
+                "peak_gpu_allocated_gib",
+                "peak_gpu_reserved_gib",
+                "peak_gpu_allocator_overhead_gib",
             )
         },
         "paired_bootstrap": {
@@ -453,6 +481,12 @@ def main() -> None:
                 "CUDA synchronization brackets every timed request; request-level token "
                 "counts and timings are retained for audit. A paired bootstrap interval "
                 "quantifies the QLoRA-minus-base request-latency delta; lower is better."
+            ),
+            "gpu_memory": (
+                "Steady-state peaks after warm-up and before model teardown. Allocated "
+                "memory measures live tensors; reserved memory measures the PyTorch CUDA "
+                "caching allocator footprint. Their difference exposes allocator overhead "
+                "that can determine whether a deployment fits in device memory."
             ),
         },
     }
