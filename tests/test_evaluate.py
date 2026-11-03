@@ -3,10 +3,27 @@ import pytest
 from scripts.evaluate import (
     build_loss_slice_report,
     select_generation_examples,
+    summarize_peak_gpu_memory,
     validate_benchmark_runtime,
     validate_paired_generation_records,
     validate_paired_loss_records,
 )
+
+
+class FakeCuda:
+    def __init__(self, *, available, allocated=0, reserved=0):
+        self.available = available
+        self.allocated = allocated
+        self.reserved = reserved
+
+    def is_available(self):
+        return self.available
+
+    def max_memory_allocated(self):
+        return self.allocated
+
+    def max_memory_reserved(self):
+        return self.reserved
 
 
 def test_gpu_benchmark_fails_closed_without_cuda():
@@ -17,6 +34,33 @@ def test_gpu_benchmark_fails_closed_without_cuda():
 @pytest.mark.parametrize("cuda_available", [False, True])
 def test_runtime_contract_allows_explicit_non_gpu_runs(cuda_available):
     validate_benchmark_runtime(cuda_available=cuda_available, require_cuda=False)
+
+
+def test_peak_gpu_memory_separates_allocated_and_reserved_capacity():
+    gibibyte = 1024**3
+
+    summary = summarize_peak_gpu_memory(
+        FakeCuda(available=True, allocated=2 * gibibyte, reserved=3 * gibibyte)
+    )
+
+    assert summary == {
+        "peak_gpu_allocated_gib": 2.0,
+        "peak_gpu_reserved_gib": 3.0,
+        "peak_gpu_allocator_overhead_gib": 1.0,
+    }
+
+
+def test_peak_gpu_memory_reports_zero_without_cuda():
+    assert summarize_peak_gpu_memory(FakeCuda(available=False)) == {
+        "peak_gpu_allocated_gib": 0.0,
+        "peak_gpu_reserved_gib": 0.0,
+        "peak_gpu_allocator_overhead_gib": 0.0,
+    }
+
+
+def test_peak_gpu_memory_rejects_inconsistent_cuda_counters():
+    with pytest.raises(RuntimeError, match="reserved bytes must be at least allocated"):
+        summarize_peak_gpu_memory(FakeCuda(available=True, allocated=2, reserved=1))
 
 
 def test_generation_warmups_are_disjoint_from_measured_examples():
