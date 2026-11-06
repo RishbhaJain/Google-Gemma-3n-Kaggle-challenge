@@ -84,6 +84,10 @@ Data preparation writes a versioned `leakage_audit.json` and refuses to create a
 usable experiment manifest when cross-split leakage is detected. The standalone
 audit command can recheck prepared files. The training script writes the adapter
 and a machine-readable training summary to `artifacts/gemma-3n-qlora/`. The
+summary separates the loaded model-and-trainer CUDA baseline from the full
+train-and-validation allocated and reserved peaks. It also reports allocator
+overhead and incremental peak pressure, making training capacity requirements
+auditable instead of presenting one ambiguous memory number. The
 evaluation script writes `results/base_vs_qlora.json`. Its benchmark fails closed
 when CUDA is unavailable, runs three untimed warm-up requests per variant,
 sourced from test examples outside the measured set, synchronizes CUDA around
