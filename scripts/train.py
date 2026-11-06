@@ -18,6 +18,63 @@ from gemma_experiment.integrity import (
     validate_split_checksum,
 )
 
+GIBIBYTE = 1024**3
+
+
+def capture_gpu_memory_baseline(cuda) -> dict[str, int]:
+    """Capture the model-and-trainer CUDA footprint before training starts."""
+    if not cuda.is_available():
+        return {"allocated_bytes": 0, "reserved_bytes": 0}
+    allocated_bytes = int(cuda.memory_allocated())
+    reserved_bytes = int(cuda.memory_reserved())
+    if allocated_bytes < 0 or reserved_bytes < allocated_bytes:
+        raise RuntimeError(
+            "Invalid CUDA baseline counters: reserved bytes must be at least allocated bytes"
+        )
+    return {
+        "allocated_bytes": allocated_bytes,
+        "reserved_bytes": reserved_bytes,
+    }
+
+
+def summarize_training_gpu_memory(cuda, baseline: dict[str, int]) -> dict[str, float]:
+    """Separate loaded-model footprint from train-and-validation peak pressure."""
+    if not cuda.is_available():
+        return {
+            "baseline_allocated_gib": 0.0,
+            "baseline_reserved_gib": 0.0,
+            "peak_allocated_gib": 0.0,
+            "peak_reserved_gib": 0.0,
+            "peak_allocator_overhead_gib": 0.0,
+            "incremental_peak_allocated_gib": 0.0,
+            "incremental_peak_reserved_gib": 0.0,
+        }
+
+    baseline_allocated = int(baseline["allocated_bytes"])
+    baseline_reserved = int(baseline["reserved_bytes"])
+    peak_allocated = int(cuda.max_memory_allocated())
+    peak_reserved = int(cuda.max_memory_reserved())
+    if baseline_allocated < 0 or baseline_reserved < baseline_allocated:
+        raise RuntimeError(
+            "Invalid CUDA baseline counters: reserved bytes must be at least allocated bytes"
+        )
+    if peak_allocated < baseline_allocated or peak_reserved < baseline_reserved:
+        raise RuntimeError("CUDA peak counters must include the captured baseline")
+    if peak_reserved < peak_allocated:
+        raise RuntimeError(
+            "Invalid CUDA peak counters: reserved bytes must be at least allocated bytes"
+        )
+
+    return {
+        "baseline_allocated_gib": baseline_allocated / GIBIBYTE,
+        "baseline_reserved_gib": baseline_reserved / GIBIBYTE,
+        "peak_allocated_gib": peak_allocated / GIBIBYTE,
+        "peak_reserved_gib": peak_reserved / GIBIBYTE,
+        "peak_allocator_overhead_gib": (peak_reserved - peak_allocated) / GIBIBYTE,
+        "incremental_peak_allocated_gib": (peak_allocated - baseline_allocated) / GIBIBYTE,
+        "incremental_peak_reserved_gib": (peak_reserved - baseline_reserved) / GIBIBYTE,
+    }
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -110,10 +167,12 @@ def main() -> None:
         ),
     )
 
+    gpu_memory_baseline = capture_gpu_memory_baseline(torch.cuda)
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     train_result = trainer.train()
     validation = trainer.evaluate()
+    training_gpu_memory = summarize_training_gpu_memory(torch.cuda, gpu_memory_baseline)
 
     adapter_dir = Path(train_config["adapter_dir"])
     adapter_dir.mkdir(parents=True, exist_ok=True)
@@ -145,9 +204,7 @@ def main() -> None:
         "trainable_parameter_percent": 100 * trainable_parameters / total_parameters,
         "train_metrics": train_result.metrics,
         "validation_metrics": validation,
-        "peak_gpu_memory_gib": (
-            torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
-        ),
+        "training_gpu_memory": training_gpu_memory,
         "environment": {
             "python": platform.python_version(),
             "pytorch": torch.__version__,
