@@ -58,6 +58,7 @@ def summarize_generations(records: list[dict[str, float]]) -> dict[str, float]:
             "generation_requests": 0.0,
             "input_tokens": 0.0,
             "output_tokens": 0.0,
+            "generation_limit_hit_rate": 0.0,
             "latency_p50_seconds": 0.0,
             "latency_p95_seconds": 0.0,
             "requests_per_second": 0.0,
@@ -69,6 +70,7 @@ def summarize_generations(records: list[dict[str, float]]) -> dict[str, float]:
         "latency_seconds",
         "prompt_tokens",
         "generated_tokens",
+        "generation_limit_hit",
     }
     for index, record in enumerate(records):
         missing = required - record.keys()
@@ -84,6 +86,8 @@ def summarize_generations(records: list[dict[str, float]]) -> dict[str, float]:
             raise ValueError(f"generation record {index}.prompt_tokens must be positive")
         if record["generated_tokens"] < 1:
             raise ValueError(f"generation record {index}.generated_tokens must be positive")
+        if record["generation_limit_hit"] not in (0.0, 1.0):
+            raise ValueError(f"generation record {index}.generation_limit_hit must be zero or one")
     latencies = [record["latency_seconds"] for record in records]
     total_input_tokens = sum(record["prompt_tokens"] for record in records)
     total_tokens = sum(record["generated_tokens"] for record in records)
@@ -94,6 +98,8 @@ def summarize_generations(records: list[dict[str, float]]) -> dict[str, float]:
         "generation_requests": float(len(records)),
         "input_tokens": total_input_tokens,
         "output_tokens": total_tokens,
+        "generation_limit_hit_rate": sum(record["generation_limit_hit"] for record in records)
+        / len(records),
         "latency_p50_seconds": median(latencies),
         "latency_p95_seconds": percentile(latencies, 0.95),
         "requests_per_second": len(records) / total_time,
