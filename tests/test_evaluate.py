@@ -2,12 +2,23 @@ import pytest
 
 from scripts.evaluate import (
     build_loss_slice_report,
+    generation_limit_hit,
     select_generation_examples,
     summarize_peak_gpu_memory,
     validate_benchmark_runtime,
     validate_paired_generation_records,
     validate_paired_loss_records,
 )
+
+
+def test_generation_limit_hit_requires_full_budget_without_eos():
+    assert generation_limit_hit([10, 11], max_new_tokens=3, eos_token_id=2) == 0.0
+    assert generation_limit_hit([10, 11, 2], max_new_tokens=3, eos_token_id=2) == 0.0
+    assert generation_limit_hit([10, 11, 12], max_new_tokens=3, eos_token_id=2) == 1.0
+    assert generation_limit_hit([10, 11, 12], max_new_tokens=3, eos_token_id=None) == 1.0
+
+    with pytest.raises(ValueError, match="max_new_tokens must be positive"):
+        generation_limit_hit([], max_new_tokens=0, eos_token_id=2)
 
 
 class FakeCuda:

@@ -143,6 +143,25 @@ def validate_paired_generation_records(
             raise ValueError("generation record prompt_tokens differs between model variants")
 
 
+def generation_limit_hit(
+    generated_ids: Any, *, max_new_tokens: int, eos_token_id: int | list[int] | None
+) -> float:
+    """Return one when generation consumes its budget without emitting EOS."""
+    if max_new_tokens < 1:
+        raise ValueError("max_new_tokens must be positive")
+    if len(generated_ids) < max_new_tokens:
+        return 0.0
+    eos_ids = (
+        set()
+        if eos_token_id is None
+        else {eos_token_id}
+        if isinstance(eos_token_id, int)
+        else set(eos_token_id)
+    )
+    final_token_id = int(generated_ids[-1])
+    return float(not eos_ids or final_token_id not in eos_ids)
+
+
 def build_loss_slice_report(
     baseline: list[dict[str, float | int]],
     candidate: list[dict[str, float | int]],
@@ -293,6 +312,11 @@ def evaluate_variant(
             "latency_seconds": latency,
             "prompt_tokens": float(input_ids.shape[1]),
             "generated_tokens": float(len(generated_ids)),
+            "generation_limit_hit": generation_limit_hit(
+                generated_ids,
+                max_new_tokens=max_new_tokens,
+                eos_token_id=_tokenizer.eos_token_id,
+            ),
         }
 
     warmup_cases, measured_cases = select_generation_examples(
@@ -415,6 +439,7 @@ def main() -> None:
                 "completion_perplexity",
                 "exact_match",
                 "token_f1",
+                "generation_limit_hit_rate",
                 "latency_p50_seconds",
                 "latency_p95_seconds",
                 "tokens_per_second",
@@ -444,6 +469,12 @@ def main() -> None:
             "latency_seconds": paired_bootstrap_delta(
                 [record["latency_seconds"] for record in base_records],
                 [record["latency_seconds"] for record in adapter_records],
+                lower_is_better=True,
+                **bootstrap_options,
+            ),
+            "generation_limit_hit": paired_bootstrap_delta(
+                [record["generation_limit_hit"] for record in base_records],
+                [record["generation_limit_hit"] for record in adapter_records],
                 lower_is_better=True,
                 **bootstrap_options,
             ),
@@ -481,6 +512,12 @@ def main() -> None:
                 "CUDA synchronization brackets every timed request; request-level token "
                 "counts and timings are retained for audit. A paired bootstrap interval "
                 "quantifies the QLoRA-minus-base request-latency delta; lower is better."
+            ),
+            "generation_limit_hit_rate": (
+                "Fraction of measured responses that consume max_new_tokens without emitting "
+                "EOS. A high rate flags quality and latency results that may be distorted by "
+                "the generation cap. The paired interval reports the QLoRA-minus-base delta; "
+                "lower is better."
             ),
             "gpu_memory": (
                 "Steady-state peaks after warm-up and before model teardown. Allocated "

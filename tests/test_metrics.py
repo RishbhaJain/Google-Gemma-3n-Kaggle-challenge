@@ -40,6 +40,7 @@ def test_generation_summary():
                 "latency_seconds": 1.0,
                 "prompt_tokens": 20.0,
                 "generated_tokens": 10.0,
+                "generation_limit_hit": 0.0,
             },
             {
                 "exact_match": 0.0,
@@ -47,6 +48,7 @@ def test_generation_summary():
                 "latency_seconds": 3.0,
                 "prompt_tokens": 30.0,
                 "generated_tokens": 10.0,
+                "generation_limit_hit": 1.0,
             },
         ]
     )
@@ -56,6 +58,7 @@ def test_generation_summary():
     assert summary["generation_requests"] == 2.0
     assert summary["input_tokens"] == 50.0
     assert summary["output_tokens"] == 20.0
+    assert summary["generation_limit_hit_rate"] == 0.5
     assert summary["requests_per_second"] == 0.5
     assert summary["tokens_per_second"] == 5.0
 
@@ -71,6 +74,7 @@ def test_generation_summary():
                 "latency_seconds": 0.0,
                 "prompt_tokens": 5.0,
                 "generated_tokens": 1.0,
+                "generation_limit_hit": 0.0,
             },
             "latency_seconds must be positive",
         ),
@@ -81,8 +85,20 @@ def test_generation_summary():
                 "latency_seconds": 1.0,
                 "prompt_tokens": 5.0,
                 "generated_tokens": math.nan,
+                "generation_limit_hit": 0.0,
             },
             "must be finite",
+        ),
+        (
+            {
+                "exact_match": 1.0,
+                "token_f1": 1.0,
+                "latency_seconds": 1.0,
+                "prompt_tokens": 5.0,
+                "generated_tokens": 1.0,
+                "generation_limit_hit": 0.5,
+            },
+            "generation_limit_hit must be zero or one",
         ),
     ],
 )
