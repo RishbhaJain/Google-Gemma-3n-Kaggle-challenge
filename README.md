@@ -16,7 +16,7 @@ notebook.
 | QLoRA | Rank 8, alpha 8, language attention and MLP modules |
 | Training | 60 steps, effective batch size 4, learning rate 2e-4 |
 | Selection | Lowest validation completion loss, evaluated every 10 steps |
-| Final comparison | Completion NLL/perplexity, paired quality intervals, generation-cap diagnostics, warm-up-aware latency, throughput, allocated and reserved VRAM peaks |
+| Final comparison | Completion NLL/perplexity, paired quality intervals, generation-cap and degeneration diagnostics, warm-up-aware latency, throughput, allocated and reserved VRAM peaks |
 
 The dataset manifest stores split checksums, the source revision, full source row
 count, dataset fingerprint, seed, and row counts. The 3,000 examples are sampled
@@ -97,6 +97,11 @@ It also reports the fraction of responses that consume the full generation budge
 without emitting an end-of-sequence token, with a paired confidence interval for
 the QLoRA-minus-base difference. This exposes when capped completions may distort
 quality and latency comparisons instead of silently treating them as complete.
+The same content-free request records measure empty decoded responses, unique-token
+ratio, and repeated four-token windows. Paired bootstrap intervals compare each
+sequence-health signal between the base model and QLoRA adapter without storing
+generated text. These lexical diagnostics expose repetition or collapse, but they
+do not replace human or semantic evaluation.
 It resets CUDA peak counters after warm-up and reports both live-tensor allocation
 and caching-allocator reservation peaks. Their difference makes allocator overhead
 visible for deployment capacity planning instead of understating the process's VRAM
@@ -112,6 +117,9 @@ footprint.
 | p50 generation latency | pending GPU run | pending GPU run | pending |
 | p95 generation latency | pending GPU run | pending GPU run | pending |
 | Generation-limit hit rate | pending GPU run | pending GPU run | pending |
+| Empty-response rate | pending GPU run | pending GPU run | pending |
+| Mean unique-token ratio | pending GPU run | pending GPU run | pending |
+| Mean repeated 4-gram rate | pending GPU run | pending GPU run | pending |
 | Generation throughput | pending GPU run | pending GPU run | pending |
 | Peak GPU allocated memory | pending GPU run | pending GPU run | pending |
 | Peak GPU reserved memory | pending GPU run | pending GPU run | pending |
