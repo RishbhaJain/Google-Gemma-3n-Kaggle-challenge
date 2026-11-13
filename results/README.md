@@ -12,6 +12,8 @@ The result artifact records:
   with a seeded paired, token-weighted bootstrap interval for the primary loss delta;
 - paired, token-weighted completion-loss deltas across fixed original-prompt and
   completion-length slices, including the largest observed slice delta;
+- content-free empty-response, unique-token, and repeated 4-gram diagnostics with
+  paired uncertainty intervals for base-to-QLoRA changes;
 - exact match and token F1 as secondary reference-overlap diagnostics, with seeded
   paired-bootstrap confidence intervals for the QLoRA-minus-base deltas;
 - warm-up-excluded p50/p95 greedy-generation latency, request and token throughput,

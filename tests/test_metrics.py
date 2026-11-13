@@ -12,6 +12,7 @@ from gemma_experiment.metrics import (
     perplexity,
     summarize_generations,
     token_f1,
+    token_sequence_health,
 )
 
 
@@ -24,6 +25,30 @@ def test_token_f1_uses_token_overlap():
     assert token_f1("red blue", "red green") == pytest.approx(0.5)
     assert token_f1("", "") == 1.0
     assert token_f1("red", "blue") == 0.0
+
+
+def test_token_sequence_health_detects_repeated_four_grams():
+    health = token_sequence_health([1, 2, 3, 4, 1, 2, 3, 4])
+
+    assert health["unique_token_ratio"] == 0.5
+    assert health["repeated_ngram_rate"] == pytest.approx(0.2)
+    assert token_sequence_health([1, 1]) == {
+        "unique_token_ratio": 0.5,
+        "repeated_ngram_rate": 0.0,
+    }
+    assert token_sequence_health([]) == {
+        "unique_token_ratio": 0.0,
+        "repeated_ngram_rate": 0.0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("token_ids", "ngram_size", "message"),
+    [([1], 0, "positive integer"), ([-1], 4, "non-negative")],
+)
+def test_token_sequence_health_rejects_invalid_inputs(token_ids, ngram_size, message):
+    with pytest.raises(ValueError, match=message):
+        token_sequence_health(token_ids, ngram_size=ngram_size)
 
 
 def test_percentile_interpolates():
@@ -41,6 +66,9 @@ def test_generation_summary():
                 "prompt_tokens": 20.0,
                 "generated_tokens": 10.0,
                 "generation_limit_hit": 0.0,
+                "empty_response": 0.0,
+                "unique_token_ratio": 0.8,
+                "repeated_4gram_rate": 0.0,
             },
             {
                 "exact_match": 0.0,
@@ -49,6 +77,9 @@ def test_generation_summary():
                 "prompt_tokens": 30.0,
                 "generated_tokens": 10.0,
                 "generation_limit_hit": 1.0,
+                "empty_response": 1.0,
+                "unique_token_ratio": 0.4,
+                "repeated_4gram_rate": 0.2,
             },
         ]
     )
@@ -59,6 +90,9 @@ def test_generation_summary():
     assert summary["input_tokens"] == 50.0
     assert summary["output_tokens"] == 20.0
     assert summary["generation_limit_hit_rate"] == 0.5
+    assert summary["empty_response_rate"] == 0.5
+    assert summary["mean_unique_token_ratio"] == pytest.approx(0.6)
+    assert summary["mean_repeated_4gram_rate"] == pytest.approx(0.1)
     assert summary["requests_per_second"] == 0.5
     assert summary["tokens_per_second"] == 5.0
 
@@ -75,6 +109,9 @@ def test_generation_summary():
                 "prompt_tokens": 5.0,
                 "generated_tokens": 1.0,
                 "generation_limit_hit": 0.0,
+                "empty_response": 0.0,
+                "unique_token_ratio": 1.0,
+                "repeated_4gram_rate": 0.0,
             },
             "latency_seconds must be positive",
         ),
@@ -86,6 +123,9 @@ def test_generation_summary():
                 "prompt_tokens": 5.0,
                 "generated_tokens": math.nan,
                 "generation_limit_hit": 0.0,
+                "empty_response": 0.0,
+                "unique_token_ratio": 1.0,
+                "repeated_4gram_rate": 0.0,
             },
             "must be finite",
         ),
@@ -97,8 +137,25 @@ def test_generation_summary():
                 "prompt_tokens": 5.0,
                 "generated_tokens": 1.0,
                 "generation_limit_hit": 0.5,
+                "empty_response": 0.0,
+                "unique_token_ratio": 1.0,
+                "repeated_4gram_rate": 0.0,
             },
             "generation_limit_hit must be zero or one",
+        ),
+        (
+            {
+                "exact_match": 1.0,
+                "token_f1": 1.0,
+                "latency_seconds": 1.0,
+                "prompt_tokens": 5.0,
+                "generated_tokens": 1.0,
+                "generation_limit_hit": 0.0,
+                "empty_response": 0.0,
+                "unique_token_ratio": 1.1,
+                "repeated_4gram_rate": 0.0,
+            },
+            "unique_token_ratio must be between zero and one",
         ),
     ],
 )

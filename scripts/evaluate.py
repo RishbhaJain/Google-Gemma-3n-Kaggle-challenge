@@ -30,6 +30,7 @@ from gemma_experiment.metrics import (
     perplexity,
     summarize_generations,
     token_f1,
+    token_sequence_health,
 )
 
 LENGTH_SLICE_BOUNDARIES = {
@@ -305,18 +306,23 @@ def evaluate_variant(
             torch.cuda.synchronize()
         latency = time.perf_counter() - started
         generated_ids = output[0, input_ids.shape[1] :]
-        prediction = _tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+        generated_token_ids = generated_ids.tolist()
+        prediction = _tokenizer.decode(generated_token_ids, skip_special_tokens=True).strip()
+        sequence_health = token_sequence_health(generated_token_ids, ngram_size=4)
         return {
             "exact_match": exact_match(prediction, reference),
             "token_f1": token_f1(prediction, reference),
             "latency_seconds": latency,
             "prompt_tokens": float(input_ids.shape[1]),
-            "generated_tokens": float(len(generated_ids)),
+            "generated_tokens": float(len(generated_token_ids)),
             "generation_limit_hit": generation_limit_hit(
-                generated_ids,
+                generated_token_ids,
                 max_new_tokens=max_new_tokens,
                 eos_token_id=_tokenizer.eos_token_id,
             ),
+            "empty_response": float(not prediction),
+            "unique_token_ratio": sequence_health["unique_token_ratio"],
+            "repeated_4gram_rate": sequence_health["repeated_ngram_rate"],
         }
 
     warmup_cases, measured_cases = select_generation_examples(
@@ -440,6 +446,9 @@ def main() -> None:
                 "exact_match",
                 "token_f1",
                 "generation_limit_hit_rate",
+                "empty_response_rate",
+                "mean_unique_token_ratio",
+                "mean_repeated_4gram_rate",
                 "latency_p50_seconds",
                 "latency_p95_seconds",
                 "tokens_per_second",
@@ -475,6 +484,23 @@ def main() -> None:
             "generation_limit_hit": paired_bootstrap_delta(
                 [record["generation_limit_hit"] for record in base_records],
                 [record["generation_limit_hit"] for record in adapter_records],
+                lower_is_better=True,
+                **bootstrap_options,
+            ),
+            "empty_response": paired_bootstrap_delta(
+                [record["empty_response"] for record in base_records],
+                [record["empty_response"] for record in adapter_records],
+                lower_is_better=True,
+                **bootstrap_options,
+            ),
+            "unique_token_ratio": paired_bootstrap_delta(
+                [record["unique_token_ratio"] for record in base_records],
+                [record["unique_token_ratio"] for record in adapter_records],
+                **bootstrap_options,
+            ),
+            "repeated_4gram_rate": paired_bootstrap_delta(
+                [record["repeated_4gram_rate"] for record in base_records],
+                [record["repeated_4gram_rate"] for record in adapter_records],
                 lower_is_better=True,
                 **bootstrap_options,
             ),
@@ -518,6 +544,14 @@ def main() -> None:
                 "EOS. A high rate flags quality and latency results that may be distorted by "
                 "the generation cap. The paired interval reports the QLoRA-minus-base delta; "
                 "lower is better."
+            ),
+            "generation_health": (
+                "Content-free diagnostics for empty decoded responses, token diversity, "
+                "and repeated four-token windows. Each metric retains the paired "
+                "base/adapter request alignment and receives a bootstrap interval. Lower "
+                "empty-response and repetition deltas are better; higher token diversity "
+                "is better. These lexical diagnostics flag degeneration but do not measure "
+                "semantic quality."
             ),
             "gpu_memory": (
                 "Steady-state peaks after warm-up and before model teardown. Allocated "

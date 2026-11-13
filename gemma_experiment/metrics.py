@@ -35,6 +35,26 @@ def token_f1(prediction: str, reference: str) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
+def token_sequence_health(token_ids: Iterable[int], *, ngram_size: int = 4) -> dict[str, float]:
+    """Return content-free token diversity and repetition diagnostics."""
+    if type(ngram_size) is not int or ngram_size < 1:
+        raise ValueError("ngram_size must be a positive integer")
+    tokens = [int(token_id) for token_id in token_ids]
+    if any(token_id < 0 for token_id in tokens):
+        raise ValueError("token ids must be non-negative")
+    if not tokens:
+        return {"unique_token_ratio": 0.0, "repeated_ngram_rate": 0.0}
+
+    ngrams = [
+        tuple(tokens[index : index + ngram_size]) for index in range(len(tokens) - ngram_size + 1)
+    ]
+    repeated_ngram_rate = (len(ngrams) - len(set(ngrams))) / len(ngrams) if ngrams else 0.0
+    return {
+        "unique_token_ratio": len(set(tokens)) / len(tokens),
+        "repeated_ngram_rate": repeated_ngram_rate,
+    }
+
+
 def percentile(values: Iterable[float], quantile: float) -> float:
     ordered = sorted(values)
     if not ordered:
@@ -59,6 +79,9 @@ def summarize_generations(records: list[dict[str, float]]) -> dict[str, float]:
             "input_tokens": 0.0,
             "output_tokens": 0.0,
             "generation_limit_hit_rate": 0.0,
+            "empty_response_rate": 0.0,
+            "mean_unique_token_ratio": 0.0,
+            "mean_repeated_4gram_rate": 0.0,
             "latency_p50_seconds": 0.0,
             "latency_p95_seconds": 0.0,
             "requests_per_second": 0.0,
@@ -71,6 +94,9 @@ def summarize_generations(records: list[dict[str, float]]) -> dict[str, float]:
         "prompt_tokens",
         "generated_tokens",
         "generation_limit_hit",
+        "empty_response",
+        "unique_token_ratio",
+        "repeated_4gram_rate",
     }
     for index, record in enumerate(records):
         missing = required - record.keys()
@@ -88,6 +114,11 @@ def summarize_generations(records: list[dict[str, float]]) -> dict[str, float]:
             raise ValueError(f"generation record {index}.generated_tokens must be positive")
         if record["generation_limit_hit"] not in (0.0, 1.0):
             raise ValueError(f"generation record {index}.generation_limit_hit must be zero or one")
+        if record["empty_response"] not in (0.0, 1.0):
+            raise ValueError(f"generation record {index}.empty_response must be zero or one")
+        for field in ("unique_token_ratio", "repeated_4gram_rate"):
+            if not 0.0 <= record[field] <= 1.0:
+                raise ValueError(f"generation record {index}.{field} must be between zero and one")
     latencies = [record["latency_seconds"] for record in records]
     total_input_tokens = sum(record["prompt_tokens"] for record in records)
     total_tokens = sum(record["generated_tokens"] for record in records)
@@ -99,6 +130,11 @@ def summarize_generations(records: list[dict[str, float]]) -> dict[str, float]:
         "input_tokens": total_input_tokens,
         "output_tokens": total_tokens,
         "generation_limit_hit_rate": sum(record["generation_limit_hit"] for record in records)
+        / len(records),
+        "empty_response_rate": sum(record["empty_response"] for record in records) / len(records),
+        "mean_unique_token_ratio": sum(record["unique_token_ratio"] for record in records)
+        / len(records),
+        "mean_repeated_4gram_rate": sum(record["repeated_4gram_rate"] for record in records)
         / len(records),
         "latency_p50_seconds": median(latencies),
         "latency_p95_seconds": percentile(latencies, 0.95),
