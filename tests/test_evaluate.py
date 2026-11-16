@@ -1,6 +1,9 @@
 import pytest
 
 from scripts.evaluate import (
+    DELTA_METRICS,
+    RESULT_SCHEMA_VERSION,
+    build_comparison_report,
     build_loss_slice_report,
     generation_limit_hit,
     select_generation_examples,
@@ -9,6 +12,35 @@ from scripts.evaluate import (
     validate_paired_generation_records,
     validate_paired_loss_records,
 )
+
+
+def comparison_metrics(value):
+    return {metric: value for metric in DELTA_METRICS}
+
+
+def generation_record(index, *, candidate=False):
+    return {
+        "example_index": float(index),
+        "prompt_tokens": float(64 + index),
+        "generated_tokens": 8.0,
+        "exact_match": float(candidate),
+        "token_f1": 0.9 if candidate else 0.7,
+        "latency_seconds": 0.8 if candidate else 1.0,
+        "generation_limit_hit": 0.0,
+        "empty_response": 0.0,
+        "unique_token_ratio": 0.8 if candidate else 0.6,
+        "repeated_4gram_rate": 0.1 if candidate else 0.2,
+    }
+
+
+def loss_record(index, loss, tokens):
+    return {
+        "example_index": index,
+        "mean_loss": loss,
+        "scored_tokens": tokens,
+        "original_prompt_tokens": 64 + index,
+        "completion_tokens": tokens,
+    }
 
 
 def test_generation_limit_hit_requires_full_budget_without_eos():
@@ -184,3 +216,51 @@ def test_loss_slice_report_exposes_prompt_and_completion_regressions():
     assert report["original_prompt_tokens"]["largest_delta_slice"] == "513+"
     assert report["completion_tokens"]["largest_delta_slice"] == "65-128"
     assert report["completion_tokens"]["has_observed_regression"] is True
+
+
+def test_comparison_report_contract_is_versioned_paired_and_directional():
+    base_records = [generation_record(0), generation_record(1)]
+    adapter_records = [
+        generation_record(0, candidate=True),
+        generation_record(1, candidate=True),
+    ]
+    base_loss_records = [loss_record(0, 1.0, 9), loss_record(1, 3.0, 1)]
+    adapter_loss_records = [loss_record(0, 0.5, 9), loss_record(1, 4.0, 1)]
+
+    report = build_comparison_report(
+        comparison_metrics(1.0),
+        comparison_metrics(1.25),
+        base_records,
+        adapter_records,
+        base_loss_records,
+        adapter_loss_records,
+        bootstrap_options={"confidence": 0.95, "samples": 200, "seed": 7},
+    )
+
+    assert report["schema_version"] == RESULT_SCHEMA_VERSION
+    assert set(report["delta"]) == set(DELTA_METRICS)
+    assert set(report["delta"].values()) == {0.25}
+    bootstrap = report["paired_bootstrap"]
+    assert bootstrap["completion_loss"]["observed_delta"] == pytest.approx(-0.35)
+    assert bootstrap["completion_loss"]["paired_tokens"] == 10
+    assert bootstrap["completion_loss"]["improvement_direction"] == "lower"
+    assert bootstrap["latency_seconds"]["improvement_direction"] == "lower"
+    assert bootstrap["unique_token_ratio"]["improvement_direction"] == "higher"
+    assert report["completion_loss_slices"]["completion_tokens"]["has_observed_regression"] is False
+
+
+def test_comparison_report_rejects_unpaired_records():
+    base_records = [generation_record(0)]
+    adapter_records = [{**generation_record(0, candidate=True), "example_index": 1.0}]
+    loss_records = [loss_record(0, 1.0, 8)]
+
+    with pytest.raises(ValueError, match="indices are not aligned"):
+        build_comparison_report(
+            comparison_metrics(1.0),
+            comparison_metrics(1.25),
+            base_records,
+            adapter_records,
+            loss_records,
+            loss_records,
+            bootstrap_options={"confidence": 0.95, "samples": 20, "seed": 7},
+        )

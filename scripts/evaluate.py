@@ -38,6 +38,26 @@ LENGTH_SLICE_BOUNDARIES = {
     "completion_tokens": [64, 128, 256],
 }
 
+RESULT_SCHEMA_VERSION = 1
+DELTA_METRICS = (
+    "completion_loss",
+    "completion_perplexity",
+    "exact_match",
+    "token_f1",
+    "generation_limit_hit_rate",
+    "empty_response_rate",
+    "mean_unique_token_ratio",
+    "mean_repeated_4gram_rate",
+    "latency_p50_seconds",
+    "latency_p95_seconds",
+    "tokens_per_second",
+    "requests_per_second",
+    "model_load_seconds",
+    "peak_gpu_allocated_gib",
+    "peak_gpu_reserved_gib",
+    "peak_gpu_allocator_overhead_gib",
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -142,6 +162,79 @@ def validate_paired_generation_records(
             raise ValueError("generation record example indices are not aligned")
         if base_record["prompt_tokens"] != candidate_record["prompt_tokens"]:
             raise ValueError("generation record prompt_tokens differs between model variants")
+
+
+def build_comparison_report(
+    base_metrics: dict[str, float],
+    adapter_metrics: dict[str, float],
+    base_records: list[dict[str, float]],
+    adapter_records: list[dict[str, float]],
+    base_loss_records: list[dict[str, float | int]],
+    adapter_loss_records: list[dict[str, float | int]],
+    *,
+    bootstrap_options: dict[str, float | int],
+) -> dict[str, object]:
+    """Build the versioned, CPU-testable statistical comparison contract."""
+    validate_paired_generation_records(base_records, adapter_records)
+    validate_paired_loss_records(base_loss_records, adapter_loss_records)
+    for metric in DELTA_METRICS:
+        if metric not in base_metrics or metric not in adapter_metrics:
+            raise ValueError(f"comparison metrics are missing {metric}")
+
+    paired_bootstrap = {
+        "completion_loss": paired_weighted_bootstrap_delta(
+            [float(record["mean_loss"]) for record in base_loss_records],
+            [float(record["mean_loss"]) for record in adapter_loss_records],
+            [int(record["scored_tokens"]) for record in base_loss_records],
+            lower_is_better=True,
+            **bootstrap_options,
+        ),
+        **{
+            metric: paired_bootstrap_delta(
+                [record[metric] for record in base_records],
+                [record[metric] for record in adapter_records],
+                **bootstrap_options,
+            )
+            for metric in ("exact_match", "token_f1")
+        },
+        "latency_seconds": paired_bootstrap_delta(
+            [record["latency_seconds"] for record in base_records],
+            [record["latency_seconds"] for record in adapter_records],
+            lower_is_better=True,
+            **bootstrap_options,
+        ),
+        "generation_limit_hit": paired_bootstrap_delta(
+            [record["generation_limit_hit"] for record in base_records],
+            [record["generation_limit_hit"] for record in adapter_records],
+            lower_is_better=True,
+            **bootstrap_options,
+        ),
+        "empty_response": paired_bootstrap_delta(
+            [record["empty_response"] for record in base_records],
+            [record["empty_response"] for record in adapter_records],
+            lower_is_better=True,
+            **bootstrap_options,
+        ),
+        "unique_token_ratio": paired_bootstrap_delta(
+            [record["unique_token_ratio"] for record in base_records],
+            [record["unique_token_ratio"] for record in adapter_records],
+            **bootstrap_options,
+        ),
+        "repeated_4gram_rate": paired_bootstrap_delta(
+            [record["repeated_4gram_rate"] for record in base_records],
+            [record["repeated_4gram_rate"] for record in adapter_records],
+            lower_is_better=True,
+            **bootstrap_options,
+        ),
+    }
+    return {
+        "schema_version": RESULT_SCHEMA_VERSION,
+        "delta": {
+            metric: adapter_metrics[metric] - base_metrics[metric] for metric in DELTA_METRICS
+        },
+        "paired_bootstrap": paired_bootstrap,
+        "completion_loss_slices": build_loss_slice_report(base_loss_records, adapter_loss_records),
+    }
 
 
 def generation_limit_hit(
@@ -416,15 +509,23 @@ def main() -> None:
     adapter_metrics, _, adapter_records, adapter_loss_records = evaluate_variant(
         model_path=str(adapter_path), **common
     )
-    validate_paired_generation_records(base_records, adapter_records)
-    validate_paired_loss_records(base_loss_records, adapter_loss_records)
     bootstrap_options = {
         "confidence": eval_config["bootstrap_confidence"],
         "samples": eval_config["bootstrap_samples"],
         "seed": eval_config["bootstrap_seed"],
     }
+    comparison = build_comparison_report(
+        base_metrics,
+        adapter_metrics,
+        base_records,
+        adapter_records,
+        base_loss_records,
+        adapter_loss_records,
+        bootstrap_options=bootstrap_options,
+    )
 
     result = {
+        **comparison,
         "completed_at_utc": datetime.now(UTC).isoformat(),
         "dataset_manifest_sha256": dataset_manifest_sha256,
         "experiment_config_sha256": config_report["config_sha256"],
@@ -438,74 +539,6 @@ def main() -> None:
         "training_summary_sha256": training_summary_sha256,
         "base": base_metrics,
         "qlora": adapter_metrics,
-        "delta": {
-            key: adapter_metrics[key] - base_metrics[key]
-            for key in (
-                "completion_loss",
-                "completion_perplexity",
-                "exact_match",
-                "token_f1",
-                "generation_limit_hit_rate",
-                "empty_response_rate",
-                "mean_unique_token_ratio",
-                "mean_repeated_4gram_rate",
-                "latency_p50_seconds",
-                "latency_p95_seconds",
-                "tokens_per_second",
-                "requests_per_second",
-                "model_load_seconds",
-                "peak_gpu_allocated_gib",
-                "peak_gpu_reserved_gib",
-                "peak_gpu_allocator_overhead_gib",
-            )
-        },
-        "paired_bootstrap": {
-            "completion_loss": paired_weighted_bootstrap_delta(
-                [float(record["mean_loss"]) for record in base_loss_records],
-                [float(record["mean_loss"]) for record in adapter_loss_records],
-                [int(record["scored_tokens"]) for record in base_loss_records],
-                lower_is_better=True,
-                **bootstrap_options,
-            ),
-            **{
-                metric: paired_bootstrap_delta(
-                    [record[metric] for record in base_records],
-                    [record[metric] for record in adapter_records],
-                    **bootstrap_options,
-                )
-                for metric in ("exact_match", "token_f1")
-            },
-            "latency_seconds": paired_bootstrap_delta(
-                [record["latency_seconds"] for record in base_records],
-                [record["latency_seconds"] for record in adapter_records],
-                lower_is_better=True,
-                **bootstrap_options,
-            ),
-            "generation_limit_hit": paired_bootstrap_delta(
-                [record["generation_limit_hit"] for record in base_records],
-                [record["generation_limit_hit"] for record in adapter_records],
-                lower_is_better=True,
-                **bootstrap_options,
-            ),
-            "empty_response": paired_bootstrap_delta(
-                [record["empty_response"] for record in base_records],
-                [record["empty_response"] for record in adapter_records],
-                lower_is_better=True,
-                **bootstrap_options,
-            ),
-            "unique_token_ratio": paired_bootstrap_delta(
-                [record["unique_token_ratio"] for record in base_records],
-                [record["unique_token_ratio"] for record in adapter_records],
-                **bootstrap_options,
-            ),
-            "repeated_4gram_rate": paired_bootstrap_delta(
-                [record["repeated_4gram_rate"] for record in base_records],
-                [record["repeated_4gram_rate"] for record in adapter_records],
-                lower_is_better=True,
-                **bootstrap_options,
-            ),
-        },
-        "completion_loss_slices": build_loss_slice_report(base_loss_records, adapter_loss_records),
         "environment": environment,
         "inference_records": {
             "generation": {
