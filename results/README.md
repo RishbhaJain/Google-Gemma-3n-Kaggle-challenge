@@ -4,7 +4,7 @@
 not checked in yet because this environment does not have the GPU and model access
 needed to produce a genuine run.
 
-The result artifact records:
+The versioned result artifact records:
 
 - the SHA-256 hashes of the data manifest and untouched test split;
 - the exact base-model commit and SHA-256 hash of the pinned PEFT adapter config;
