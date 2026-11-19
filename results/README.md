@@ -16,9 +16,10 @@ The versioned result artifact records:
   paired uncertainty intervals for base-to-QLoRA changes;
 - exact match and token F1 as secondary reference-overlap diagnostics, with seeded
   paired-bootstrap confidence intervals for the QLoRA-minus-base deltas;
-- warm-up-excluded p50/p95 greedy-generation latency, request and token throughput,
-  model-load time, and steady-state allocated, reserved, and allocator-overhead GPU
-  memory peaks;
+- warm-up-excluded p50/p95 greedy-generation latency with paired bootstrap
+  intervals for both percentile deltas, request and token throughput, model-load
+  time, and steady-state allocated, reserved, and allocator-overhead GPU memory
+  peaks;
 - content-free per-example loss/token records plus per-request prompt/output token
   counts and synchronized timings;
 - base-to-adapter deltas, experiment configuration, and hardware/software versions.

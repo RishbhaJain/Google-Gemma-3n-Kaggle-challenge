@@ -50,6 +50,10 @@ point estimate matches the primary token-level NLL. This makes uncertainty visib
 without treating examples as independent across the two model runs.
 Request latency uses the same paired design with lower-is-better semantics after
 verifying that example indices and prompt-token counts align across variants.
+The report separately bootstraps the p50 and p95 latency deltas by resampling the
+same prompt indices for both variants. This puts uncertainty around the headline
+median and tail-latency comparisons instead of treating two sample percentiles as
+stable deployment measurements.
 The same paired loss records are also broken into fixed prompt- and completion-length
 slices. Each populated slice reports its example count, scored tokens, both weighted
 losses, and the QLoRA-minus-base delta, plus the largest observed delta. This catches

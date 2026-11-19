@@ -25,8 +25,10 @@ from gemma_experiment.integrity import (
 from gemma_experiment.metrics import (
     exact_match,
     paired_bootstrap_delta,
+    paired_bootstrap_statistic_delta,
     paired_weighted_bootstrap_delta,
     paired_weighted_slice_deltas,
+    percentile,
     perplexity,
     summarize_generations,
     token_f1,
@@ -38,7 +40,7 @@ LENGTH_SLICE_BOUNDARIES = {
     "completion_tokens": [64, 128, 256],
 }
 
-RESULT_SCHEMA_VERSION = 1
+RESULT_SCHEMA_VERSION = 2
 DELTA_METRICS = (
     "completion_loss",
     "completion_perplexity",
@@ -200,6 +202,22 @@ def build_comparison_report(
         "latency_seconds": paired_bootstrap_delta(
             [record["latency_seconds"] for record in base_records],
             [record["latency_seconds"] for record in adapter_records],
+            lower_is_better=True,
+            **bootstrap_options,
+        ),
+        "latency_p50_seconds": paired_bootstrap_statistic_delta(
+            [record["latency_seconds"] for record in base_records],
+            [record["latency_seconds"] for record in adapter_records],
+            statistic=lambda values: percentile(values, 0.5),
+            statistic_name="p50",
+            lower_is_better=True,
+            **bootstrap_options,
+        ),
+        "latency_p95_seconds": paired_bootstrap_statistic_delta(
+            [record["latency_seconds"] for record in base_records],
+            [record["latency_seconds"] for record in adapter_records],
+            statistic=lambda values: percentile(values, 0.95),
+            statistic_name="p95",
             lower_is_better=True,
             **bootstrap_options,
         ),
@@ -569,8 +587,9 @@ def main() -> None:
                 "Configured warm-up requests are excluded from latency and throughput. "
                 "Warm-up prompts are disjoint from measured prompts. "
                 "CUDA synchronization brackets every timed request; request-level token "
-                "counts and timings are retained for audit. A paired bootstrap interval "
-                "quantifies the QLoRA-minus-base request-latency delta; lower is better."
+                "counts and timings are retained for audit. Paired bootstrap intervals "
+                "quantify QLoRA-minus-base mean, p50, and p95 latency deltas while "
+                "resampling identical prompts for both variants; lower is better."
             ),
             "generation_limit_hit_rate": (
                 "Fraction of measured responses that consume max_new_tokens without emitting "

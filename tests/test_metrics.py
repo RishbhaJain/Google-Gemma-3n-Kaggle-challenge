@@ -6,6 +6,7 @@ from gemma_experiment.metrics import (
     exact_match,
     normalize_answer,
     paired_bootstrap_delta,
+    paired_bootstrap_statistic_delta,
     paired_weighted_bootstrap_delta,
     paired_weighted_slice_deltas,
     percentile,
@@ -201,6 +202,57 @@ def test_paired_bootstrap_uses_lower_latency_as_improvement():
     assert result["observed_delta"] == pytest.approx(-0.5)
     assert result["probability_improved"] == 1.0
     assert result["improvement_direction"] == "lower"
+
+
+def test_paired_statistic_bootstrap_preserves_pairing_for_tail_latency():
+    baseline = [1.0, 2.0, 3.0, 4.0]
+    candidate = [0.5, 1.5, 2.5, 3.5]
+
+    result = paired_bootstrap_statistic_delta(
+        baseline,
+        candidate,
+        statistic=lambda values: percentile(values, 0.95),
+        statistic_name="p95",
+        samples=500,
+        seed=7,
+        lower_is_better=True,
+    )
+
+    assert result["statistic"] == "p95"
+    assert result["observed_delta"] == pytest.approx(-0.5)
+    assert result["probability_improved"] == 1.0
+    assert result["paired_examples"] == 4
+    assert result == paired_bootstrap_statistic_delta(
+        baseline,
+        candidate,
+        statistic=lambda values: percentile(values, 0.95),
+        statistic_name="p95",
+        samples=500,
+        seed=7,
+        lower_is_better=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("baseline", "candidate", "kwargs", "message"),
+    [
+        ([], [], {}, "same non-zero length"),
+        ([1.0], [1.0, 2.0], {}, "same non-zero length"),
+        ([1.0], [1.0], {"statistic_name": ""}, "non-empty string"),
+        ([math.nan], [1.0], {}, "finite values"),
+    ],
+)
+def test_paired_statistic_bootstrap_rejects_invalid_inputs(baseline, candidate, kwargs, message):
+    statistic_name = kwargs.pop("statistic_name", "mean")
+    with pytest.raises(ValueError, match=message):
+        paired_bootstrap_statistic_delta(
+            baseline,
+            candidate,
+            statistic=lambda values: sum(values) / len(values),
+            statistic_name=statistic_name,
+            samples=20,
+            **kwargs,
+        )
 
 
 @pytest.mark.parametrize(

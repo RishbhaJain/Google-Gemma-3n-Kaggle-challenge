@@ -245,6 +245,11 @@ def test_comparison_report_contract_is_versioned_paired_and_directional():
     assert bootstrap["completion_loss"]["paired_tokens"] == 10
     assert bootstrap["completion_loss"]["improvement_direction"] == "lower"
     assert bootstrap["latency_seconds"]["improvement_direction"] == "lower"
+    assert bootstrap["latency_p50_seconds"]["statistic"] == "p50"
+    assert bootstrap["latency_p50_seconds"]["observed_delta"] == pytest.approx(-0.2)
+    assert bootstrap["latency_p95_seconds"]["statistic"] == "p95"
+    assert bootstrap["latency_p95_seconds"]["observed_delta"] == pytest.approx(-0.2)
+    assert bootstrap["latency_p95_seconds"]["improvement_direction"] == "lower"
     assert bootstrap["unique_token_ratio"]["improvement_direction"] == "higher"
     assert report["completion_loss_slices"]["completion_tokens"]["has_observed_regression"] is False
 
