@@ -7,7 +7,7 @@ import random
 import re
 import string
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from statistics import median
 
 
@@ -195,6 +195,66 @@ def paired_bootstrap_delta(
         "probability_improved": improved / samples,
         "improvement_direction": "lower" if lower_is_better else "higher",
         "paired_examples": len(paired_deltas),
+        "confidence": confidence,
+        "bootstrap_samples": samples,
+        "seed": seed,
+    }
+
+
+def paired_bootstrap_statistic_delta(
+    baseline: list[float],
+    candidate: list[float],
+    *,
+    statistic: Callable[[list[float]], float],
+    statistic_name: str,
+    confidence: float = 0.95,
+    samples: int = 2_000,
+    seed: int = 3407,
+    lower_is_better: bool = False,
+) -> dict[str, float | int | str]:
+    """Bootstrap a paired delta for a non-additive summary statistic.
+
+    The same resampled example indices are applied to both variants. This keeps
+    prompt difficulty paired while allowing uncertainty estimates for statistics
+    such as p50 and p95 latency, whose deltas cannot be recovered by averaging
+    request-level differences.
+    """
+    if not baseline or len(baseline) != len(candidate):
+        raise ValueError("baseline and candidate must have the same non-zero length")
+    if not isinstance(statistic_name, str) or not statistic_name.strip():
+        raise ValueError("statistic_name must be a non-empty string")
+    if samples < 1:
+        raise ValueError("samples must be at least one")
+    if not 0 < confidence < 1:
+        raise ValueError("confidence must be between zero and one")
+    if not all(math.isfinite(value) for value in baseline + candidate):
+        raise ValueError("bootstrap inputs must contain only finite values")
+
+    def delta(indices: list[int]) -> float:
+        base_value = statistic([baseline[index] for index in indices])
+        candidate_value = statistic([candidate[index] for index in indices])
+        if not math.isfinite(base_value) or not math.isfinite(candidate_value):
+            raise ValueError("statistic must return finite values")
+        return candidate_value - base_value
+
+    indices = list(range(len(baseline)))
+    observed_delta = delta(indices)
+    generator = random.Random(seed)
+    bootstrap_deltas = [delta([generator.choice(indices) for _ in indices]) for _ in range(samples)]
+    alpha = 1 - confidence
+    improved = (
+        sum(value < 0 for value in bootstrap_deltas)
+        if lower_is_better
+        else sum(value > 0 for value in bootstrap_deltas)
+    )
+    return {
+        "statistic": statistic_name,
+        "observed_delta": observed_delta,
+        "confidence_interval_low": percentile(bootstrap_deltas, alpha / 2),
+        "confidence_interval_high": percentile(bootstrap_deltas, 1 - alpha / 2),
+        "probability_improved": improved / samples,
+        "improvement_direction": "lower" if lower_is_better else "higher",
+        "paired_examples": len(indices),
         "confidence": confidence,
         "bootstrap_samples": samples,
         "seed": seed,
