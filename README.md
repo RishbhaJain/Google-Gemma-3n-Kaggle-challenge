@@ -1,10 +1,26 @@
 # Reproducible Gemma 3n QLoRA experiment
 
+[![CI](https://github.com/RishbhaJain/Google-Gemma-3n-Kaggle-challenge/actions/workflows/ci.yml/badge.svg)](https://github.com/RishbhaJain/Google-Gemma-3n-Kaggle-challenge/actions/workflows/ci.yml)
+
 This repository fine-tunes `unsloth/gemma-3n-E4B-it` on a pinned revision of
 FineTome-100k and compares the resulting QLoRA adapter with the unchanged base
 model on an untouched test split. The original Kaggle notebook remains in `nb/`;
 the scripts added here make its experiment reviewable and repeatable outside a
 notebook.
+
+## What I built
+
+- Converted the original Kaggle notebook into a configuration-driven training
+  and evaluation pipeline with pinned model and dataset revisions.
+- Added fail-closed data provenance, split-integrity, leakage, adapter, and
+  experiment-fingerprint checks.
+- Implemented paired base-versus-QLoRA evaluation with bootstrap uncertainty,
+  length-sliced loss analysis, generation-health diagnostics, and synchronized
+  latency, throughput, and VRAM measurement.
+- Defined a versioned result contract with synthetic CPU tests so CI can validate
+  evaluation correctness without downloading model weights or the dataset.
+- Kept unrun GPU results explicitly pending instead of presenting synthetic or
+  unverified benchmark numbers.
 
 ## Experiment design
 
