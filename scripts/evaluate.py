@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import gc
 import json
-import platform
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,6 +33,7 @@ from gemma_experiment.metrics import (
     token_f1,
     token_sequence_health,
 )
+from gemma_experiment.provenance import capture_runtime_environment
 
 LENGTH_SLICE_BOUNDARIES = {
     "original_prompt_tokens": [128, 256, 512],
@@ -463,18 +463,7 @@ def evaluate_variant(
             **summarize_peak_gpu_memory(torch.cuda),
         }
     )
-    environment = {
-        "python": platform.python_version(),
-        "pytorch": torch.__version__,
-        "cuda": torch.version.cuda,
-        "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
-        "gpu_total_memory_gib": (
-            torch.cuda.get_device_properties(0).total_memory / 1024**3
-            if torch.cuda.is_available()
-            else None
-        ),
-        "cuda_required": require_cuda,
-    }
+    environment = capture_runtime_environment(torch, cuda_required=require_cuda)
     del generate_record, model, tokenizer
     gc.collect()
     if torch.cuda.is_available():
