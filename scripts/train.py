@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import platform
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from gemma_experiment.integrity import (
     validate_model_revision,
     validate_split_checksum,
 )
+from gemma_experiment.provenance import capture_runtime_environment
 
 GIBIBYTE = 1024**3
 
@@ -205,12 +205,7 @@ def main() -> None:
         "train_metrics": train_result.metrics,
         "validation_metrics": validation,
         "training_gpu_memory": training_gpu_memory,
-        "environment": {
-            "python": platform.python_version(),
-            "pytorch": torch.__version__,
-            "cuda": torch.version.cuda,
-            "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
-        },
+        "environment": capture_runtime_environment(torch),
         "config": config,
     }
     summary_path = adapter_dir / "training_summary.json"
