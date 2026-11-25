@@ -91,6 +91,7 @@ python -m scripts.prepare_data --config configs/experiment.json
 python -m scripts.audit_splits --config configs/experiment.json
 python -m scripts.train --config configs/experiment.json
 python -m scripts.evaluate --config configs/experiment.json
+python -m scripts.check_promotion
 ```
 
 Configuration validation runs before model or dataset imports. It rejects mutable
@@ -126,6 +127,11 @@ It resets CUDA peak counters after warm-up and reports both live-tensor allocati
 and caching-allocator reservation peaks. Their difference makes allocator overhead
 visible for deployment capacity planning instead of understating the process's VRAM
 footprint.
+The promotion command then fails closed unless the adapter's paired confidence bounds
+show improved completion loss without unacceptable degeneration, and its p95 latency
+and reserved-memory ratios remain within the checked-in deployment guardrails. It
+prints every decision input and exits nonzero when any gate fails, turning the GPU
+report into an auditable ship-or-hold decision rather than a collection of metrics.
 
 ## Held-out results
 

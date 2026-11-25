@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "result_schema_version": 2,
+  "thresholds": {
+    "completion_loss_upper_ci": 0.0,
+    "generation_limit_hit_rate_upper_ci": 0.05,
+    "empty_response_rate_upper_ci": 0.02,
+    "repeated_4gram_rate_upper_ci": 0.05,
+    "latency_p95_upper_ratio": 1.2,
+    "peak_gpu_reserved_ratio": 1.2
+  }
+}
