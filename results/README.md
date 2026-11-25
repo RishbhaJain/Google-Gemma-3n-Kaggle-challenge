@@ -26,5 +26,7 @@ The versioned result artifact records:
 
 The checked-in contract requires CUDA and excludes three warm-up requests per
 variant from measured latency. Run the commands in the repository README on one
-CUDA host, inspect the generated JSON, and commit that artifact only when all stages
-complete successfully.
+CUDA host, then run `python -m scripts.check_promotion`. The promotion gate uses
+conservative paired confidence bounds for quality and degeneration plus explicit
+p95-latency and reserved-memory ratios. Inspect the generated JSON and gate report,
+and commit the result artifact only when all stages complete successfully.
