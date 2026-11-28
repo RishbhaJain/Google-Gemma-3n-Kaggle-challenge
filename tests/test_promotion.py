@@ -14,8 +14,16 @@ from scripts.check_promotion import main
 
 def policy():
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "result_schema_version": 2,
+        "evidence": {
+            "experiment_config_sha256": "a" * 64,
+            "minimum_completion_loss_examples": 2,
+            "minimum_generation_examples": 2,
+            "minimum_bootstrap_samples": 2_000,
+            "minimum_bootstrap_confidence": 0.95,
+            "require_cuda": True,
+        },
         "thresholds": {
             "completion_loss_upper_ci": 0.0,
             "generation_limit_hit_rate_upper_ci": 0.05,
@@ -28,22 +36,69 @@ def policy():
 
 
 def result():
+    bootstrap_evidence = {
+        "paired_examples": 2,
+        "bootstrap_samples": 2_000,
+        "confidence": 0.95,
+    }
     return {
         "schema_version": 2,
+        "experiment_config_sha256": "a" * 64,
+        "dataset_manifest_sha256": "b" * 64,
+        "test_split_sha256": "c" * 64,
+        "adapter_config_sha256": "d" * 64,
+        "adapter_artifact_sha256": "e" * 64,
+        "training_summary_sha256": "f" * 64,
+        "base_model_revision": "1" * 40,
         "paired_bootstrap": {
-            "completion_loss": {"confidence_interval_high": -0.01},
-            "generation_limit_hit": {"confidence_interval_high": 0.03},
-            "empty_response": {"confidence_interval_high": 0.01},
-            "repeated_4gram_rate": {"confidence_interval_high": 0.04},
-            "latency_p95_seconds": {"confidence_interval_high": 0.15},
+            "completion_loss": {
+                "confidence_interval_high": -0.01,
+                **bootstrap_evidence,
+            },
+            "generation_limit_hit": {
+                "confidence_interval_high": 0.03,
+                **bootstrap_evidence,
+            },
+            "empty_response": {
+                "confidence_interval_high": 0.01,
+                **bootstrap_evidence,
+            },
+            "repeated_4gram_rate": {
+                "confidence_interval_high": 0.04,
+                **bootstrap_evidence,
+            },
+            "latency_p95_seconds": {
+                "confidence_interval_high": 0.15,
+                **bootstrap_evidence,
+            },
         },
         "base": {
             "latency_p95_seconds": 1.0,
             "peak_gpu_reserved_gib": 10.0,
+            "completion_loss_examples": 2,
+            "generation_examples": 2,
         },
         "qlora": {
             "latency_p95_seconds": 1.1,
             "peak_gpu_reserved_gib": 11.0,
+            "completion_loss_examples": 2,
+            "generation_examples": 2,
+        },
+        "inference_records": {
+            "generation": {
+                "base": [{}, {}],
+                "qlora": [{}, {}],
+            },
+            "completion_loss": {
+                "base": [{}, {}],
+                "qlora": [{}, {}],
+            },
+        },
+        "environment": {
+            "cuda_required": True,
+            "gpu": "NVIDIA Test GPU",
+            "cuda": "12.4",
+            "gpu_total_memory_gib": 24.0,
         },
     }
 
@@ -55,6 +110,8 @@ def test_promotion_passes_only_when_every_guardrail_passes():
     assert report["passed_checks"] == 6
     assert report["failed_checks"] == 0
     assert {check["name"] for check in report["checks"]} == set(policy()["thresholds"])
+    assert report["evidence"]["generation_examples"] == 2
+    assert report["evidence"]["gpu"] == "NVIDIA Test GPU"
 
 
 def test_promotion_reports_each_failed_guardrail():
@@ -103,6 +160,45 @@ def test_policy_rejects_missing_and_unknown_thresholds():
 
     with pytest.raises(PromotionValidationError, match="missing=.*empty_response.*unknown"):
         validate_promotion_policy(invalid_policy)
+
+
+@pytest.mark.parametrize(
+    "mutation,message",
+    [
+        (
+            lambda value: value.update(experiment_config_sha256="0" * 64),
+            "does not match",
+        ),
+        (
+            lambda value: value["base"].update(generation_examples=1),
+            "same generation_examples",
+        ),
+        (
+            lambda value: value["paired_bootstrap"]["completion_loss"].update(
+                bootstrap_samples=100
+            ),
+            "too few bootstrap samples",
+        ),
+        (
+            lambda value: value["paired_bootstrap"]["completion_loss"].update(confidence=1.5),
+            "must be between zero and one",
+        ),
+        (
+            lambda value: value["environment"].update(gpu=None),
+            "must identify the accelerator",
+        ),
+        (
+            lambda value: value["inference_records"]["generation"]["qlora"].pop(),
+            "must contain 2 records",
+        ),
+    ],
+)
+def test_promotion_rejects_incomplete_or_stale_evidence(mutation, message):
+    invalid_result = result()
+    mutation(invalid_result)
+
+    with pytest.raises(PromotionValidationError, match=message):
+        assess_promotion(invalid_result, policy())
 
 
 def test_checked_in_policy_matches_the_versioned_contract():

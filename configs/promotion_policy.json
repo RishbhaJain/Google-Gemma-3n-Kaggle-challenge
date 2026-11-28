@@ -1,6 +1,14 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "result_schema_version": 2,
+  "evidence": {
+    "experiment_config_sha256": "95350abe83b1ae28d9899250e4dbae84e439814e3924ede3c9c3a918df2652a1",
+    "minimum_completion_loss_examples": 300,
+    "minimum_generation_examples": 100,
+    "minimum_bootstrap_samples": 2000,
+    "minimum_bootstrap_confidence": 0.95,
+    "require_cuda": true
+  },
   "thresholds": {
     "completion_loss_upper_ci": 0.0,
     "generation_limit_hit_rate_upper_ci": 0.05,
